@@ -1,0 +1,12 @@
+safe_bayesian_optimization_node:
+  ros__parameters:
+    opt: 
+      threshold: 0
+      beta: 2.0
+      lipshitz: 1.0
+      
+    # Node configuration
+    node:
+      update_rate: 10.0  # Hz
+      log_level: "info"
+      enable_visualization: true
