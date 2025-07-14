@@ -1,30 +1,98 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from ament_index_python.packages import get_package_share_directory
+import os
+from launch.launch_description_sources import FrontendLaunchDescriptionSource
+from launch import LaunchDescription
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+
+
+
+import pathlib
+import yaml
 
 
 def generate_launch_description():
     config_file_arg = DeclareLaunchArgument(
-        'config_file',
-        default_value=PathJoinSubstitution([
-            FindPackageShare('safe_bayesian_optimization'),
-            'config',
-            'safe_bayesian_optimization.yaml'
-        ]),
-        description='Path to the configuration file'
-    )
+            'config_file',
+            default_value=PathJoinSubstitution([
+                FindPackageShare('safe_bayesian_optimization'),
+                'config',
+                'safe_bayesian_optimization.yaml'
+                ]),
+            description='Path to the configuration file'
+            )
 
-    safe_bayesian_optimization_node = Node(
-        package='safe_bayesian_optimization',
-        executable='safe_bayesian_optimization_node',
-        name='safe_bayesian_optimization_node',
-        parameters=[LaunchConfiguration('config_file')],
-        output='screen'
-    )
+    yaml_dir = get_package_share_directory("safe_bayesian_optimization")
+    config_file = os.path.join(yaml_dir, 'config/lpsc.yaml')
+    print(config_file)
+    # LaunchConfiguration('ros_control_config').perform(context)
+
+    with open(config_file, 'r') as file:
+        config = yaml.safe_load(file)
+    visualizer_params = config.get('visualizer', {}).get('ros__parameters', {})
+    print(visualizer_params)
+    mapping_params = config.get('mapping_node', {}).get('ros__parameters', {})
+    data_collector_params = config.get('data_collector', {}).get('ros__parameters', {})
+
+    foxglove_bridge_launch = IncludeLaunchDescription(
+            FrontendLaunchDescriptionSource([
+                os.path.join(
+                    get_package_share_directory('foxglove_bridge'),
+                    'launch',
+                    'foxglove_bridge_launch.xml'
+                    )
+                ])
+            )
 
     return LaunchDescription([
-        config_file_arg,
-        safe_bayesian_optimization_node
-    ])
+        config_file_arg, 
+        Node(
+            package='safe_bayesian_optimization',
+            executable='safe_bayesian_optimization_node',
+            name='safe_bayesian_optimization_node',
+            parameters=[LaunchConfiguration('config_file')],
+            output='screen'
+            ),
+        Node(
+            package='foxglove_visualization',  # Replace with the package where FakeDataPublisher is defined
+            executable='fake_data_publisher',  # Replace with the executable name of FakeDataPublisher
+            name='fake_data_publisher',
+            output='screen'
+        ),
+        Node(
+            package='foxglove_visualization',  # Replace with the package where Foxglove is defined
+            executable='visualizer',  # Replace with the executable name of Foxglove
+            name='visualizer',
+            output='screen',
+            parameters=[visualizer_params]
+        ),
+        Node(
+            package='foxglove_visualization',  # Replace with the package where FakeDataPublisher is defined
+            executable='leg_measurements_publisher',  # Replace with the executable name of FakeDataPublisher
+            name='leg_measurements_publisher',
+            output='screen'
+        ),
+        Node(
+            package='mapping_collector',  # Replace with the package where FakeDataPublisher is defined
+            executable='data_collector',  # Replace with the executable name of FakeDataPublisher
+            name='data_collector',
+            output='screen',
+            parameters=[data_collector_params]
+        ),
+
+        Node(
+            package='mapping_package',  # Replace with the package where FakeDataPublisher is defined
+            executable='terrain_mapping_node',  # Replace with the executable name of FakeDataPublisher
+            name='mapping_node',
+            output='screen',
+            parameters=[mapping_params]
+        ),
+
+        foxglove_bridge_launch,
+
+
+    ]) 

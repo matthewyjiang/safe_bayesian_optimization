@@ -1,0 +1,38 @@
+visualizer:
+  ros__parameters:
+    x_range: [0.0, 1.0]
+    y_range: [0.0, 2.5]
+    resolution: [300, 120]
+    stiffness_range: [700, 1100]
+    uncertainty_threshold: 1.0
+    uncertainty_alpha: 100
+
+# mocapCollection:
+#   ros__parameters:
+#     localIP: 
+
+
+leg_measurements_publisher:
+  ros__parameters:
+    use_mocap: False # if true, use position from mocap
+    use_gnss: False # if not use_mocap, use gnss, if true
+    use_visual_tag: True # use april tag
+    
+
+
+top_view_camera:
+  ros__parameters:
+
+data_collector:
+  ros__parameters:
+    csv_file: lpsc_official_demo_in_the_lab_4
+
+mapping_node:
+  ros__parameters:
+    x_range: [0.0, 1.0]
+    y_range: [0.0, 2.5]
+    resolution: [300, 120]
+    noise_level: 0.1
+    length_scale: 0.4
+    sigma_f: 1.0
+    enable_map_publisher: True
