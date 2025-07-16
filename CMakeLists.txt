@@ -11,6 +11,7 @@ find_package(rclcpp REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV REQUIRED)
+find_package(trusses_custom_interfaces REQUIRED)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -18,7 +19,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_executable(safe_bayesian_optimization_node src/safe_bayesian_optimization_node.cpp)
 
 # Add dependencies
-ament_target_dependencies(safe_bayesian_optimization_node rclcpp)
+ament_target_dependencies(safe_bayesian_optimization_node rclcpp trusses_custom_interfaces)
 target_link_libraries(safe_bayesian_optimization_node Eigen3::Eigen ${OpenCV_LIBRARIES})
 target_include_directories(safe_bayesian_optimization_node PRIVATE ${OpenCV_INCLUDE_DIRS})
 
