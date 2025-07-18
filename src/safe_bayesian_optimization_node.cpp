@@ -157,13 +157,13 @@ private:
       RCLCPP_DEBUG(this->get_logger(), "Spatial data service not available");
       return;
     }
+    RCLCPP_INFO(this->get_logger(), "Checking Spatial Data");
 
     auto request = std::make_shared<trusses_custom_interfaces::srv::SpatialData::Request>();
     auto future = spatial_data_client_->async_send_request(request);
 
     // Wait for the result
-    if (rclcpp::spin_until_future_complete(this->get_node_base_interface(), future) ==
-        rclcpp::FutureReturnCode::SUCCESS) {
+    if (future.wait_for(std::chrono::seconds(5)) == std::future_status::ready) {
       auto response = future.get();
       if (response->success) {
         size_t current_data_length = response->x_array.size();
@@ -196,8 +196,7 @@ private:
     auto future = terrain_map_client_->async_send_request(request);
 
     // Wait for the result
-    if (rclcpp::spin_until_future_complete(this->get_node_base_interface(), future) ==
-        rclcpp::FutureReturnCode::SUCCESS) {
+    if (future.wait_for(std::chrono::seconds(5)) == std::future_status::ready) {
       auto response = future.get();
       if (response->success) {
         RCLCPP_INFO(this->get_logger(), "Received terrain map with %zu points", 
