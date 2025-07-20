@@ -1,10 +1,13 @@
+#include "trusses_custom_interfaces/srv/get_terrain_map_with_uncertainty.hpp"
+#include "trusses_custom_interfaces/srv/spatial_data.hpp"
 #include <Eigen/Dense>
+#include <geometry_msgs/msg/point.hpp>
 #include <memory>
 #include <opencv2/opencv.hpp>
+#include <ratio>
 #include <rclcpp/rclcpp.hpp>
+
 #include <vector>
-#include "trusses_custom_interfaces/srv/spatial_data.hpp"
-#include "trusses_custom_interfaces/srv/get_terrain_map_with_uncertainty.hpp"
 
 class OptimizerNode : public rclcpp::Node {
 public:
@@ -16,25 +19,34 @@ public:
     this->declare_parameter("terrain_map.height", 2.0);
     this->declare_parameter("terrain_map.width_cells", 20);
     this->declare_parameter("terrain_map.height_cells", 20);
-    
+
     // Read parameters
     beta_ = this->get_parameter("opt.beta").as_double();
     f_min_ = this->get_parameter("opt.f_min").as_double();
     terrain_width_ = this->get_parameter("terrain_map.width").as_double();
     terrain_height_ = this->get_parameter("terrain_map.height").as_double();
-    terrain_width_cells_ = this->get_parameter("terrain_map.width_cells").as_int();
-    terrain_height_cells_ = this->get_parameter("terrain_map.height_cells").as_int();
-    
+    terrain_width_cells_ =
+        this->get_parameter("terrain_map.width_cells").as_int();
+    terrain_height_cells_ =
+        this->get_parameter("terrain_map.height_cells").as_int();
+
     // Create service clients
-    spatial_data_client_ = this->create_client<trusses_custom_interfaces::srv::SpatialData>("get_spatial_data");
-    terrain_map_client_ = this->create_client<trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>("get_terrain_map_with_uncertainty");
-    
+    spatial_data_client_ =
+        this->create_client<trusses_custom_interfaces::srv::SpatialData>(
+            "get_spatial_data");
+    terrain_map_client_ = this->create_client<
+        trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>(
+        "get_terrain_map_with_uncertainty");
+
+    // Create publisher
+    current_subgoal_pub_ = this->create_publisher<geometry_msgs::msg::Point>(
+        "current_subgoal", 10);
+
     // Create timer to check spatial data periodically
     spatial_data_timer_ = this->create_wall_timer(
-      std::chrono::seconds(1),
-      std::bind(&OptimizerNode::check_spatial_data, this)
-    );
-        
+        std::chrono::seconds(5),
+        std::bind(&OptimizerNode::check_spatial_data, this));
+
     RCLCPP_INFO(this->get_logger(), "Optimizer Node Initialized");
   }
 
@@ -51,16 +63,19 @@ private:
 
   // Spatial data monitoring
   size_t last_data_length_;
-  rclcpp::Client<trusses_custom_interfaces::srv::SpatialData>::SharedPtr spatial_data_client_;
-  rclcpp::Client<trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>::SharedPtr terrain_map_client_;
+  rclcpp::Client<trusses_custom_interfaces::srv::SpatialData>::SharedPtr
+      spatial_data_client_;
+  rclcpp::Client<trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>::
+      SharedPtr terrain_map_client_;
   rclcpp::TimerBase::SharedPtr spatial_data_timer_;
-  
+  rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr current_subgoal_pub_;
+
   // Parameters from config
   double terrain_width_;
   double terrain_height_;
   int terrain_width_cells_;
   int terrain_height_cells_;
- 
+
   void ComputeSets() {
     // Compute the confidence intervals
     ComputeConfidenceIntervals();
@@ -138,108 +153,138 @@ private:
   int GetNextSubgoal() {
     // Get frontier indices
     std::vector<int> frontier_indices = FindSafetyContourIndices();
-    
+
     if (frontier_indices.empty()) {
       RCLCPP_WARN(this->get_logger(), "No frontier points found");
       return -1;
     }
-    
+
     // TODO: Implement selection algorithm on frontier_indices
     // For now, return the first frontier index as placeholder
-    RCLCPP_INFO(this->get_logger(), "Found %lu frontier points for selection", 
+    RCLCPP_INFO(this->get_logger(), "Found %lu frontier points for selection",
                 frontier_indices.size());
-    
+
     return frontier_indices[0];
   }
 
   void check_spatial_data() {
-    if (!spatial_data_client_->wait_for_service(std::chrono::seconds(1))) {
-      RCLCPP_DEBUG(this->get_logger(), "Spatial data service not available");
+    using namespace std::chrono_literals;
+
+    if (!spatial_data_client_->wait_for_service(0s)) {
+      RCLCPP_WARN(this->get_logger(),
+                  "Spatial data service 'get_spatial_data' not available");
       return;
     }
-    RCLCPP_INFO(this->get_logger(), "Checking Spatial Data");
 
-    auto request = std::make_shared<trusses_custom_interfaces::srv::SpatialData::Request>();
-    auto future = spatial_data_client_->async_send_request(request);
+    auto request = std::make_shared<
+        trusses_custom_interfaces::srv::SpatialData::Request>();
 
-    // Wait for the result
-    if (future.wait_for(std::chrono::seconds(5)) == std::future_status::ready) {
-      auto response = future.get();
-      if (response->success) {
-        size_t current_data_length = response->x_array.size();
-        
-        if (current_data_length > last_data_length_) {
-          RCLCPP_INFO(this->get_logger(), "Spatial data length changed: %zu -> %zu", 
-                      last_data_length_, current_data_length);
-          last_data_length_ = current_data_length;
-          
-          // Request terrain map with uncertainty
-          request_terrain_map();
-        }
-      }
-    }
+    // Use callback-based async call
+    spatial_data_client_->async_send_request(
+        request,
+        [this](rclcpp::Client<trusses_custom_interfaces::srv::SpatialData>::
+                   SharedFuture future) {
+          auto response = future.get();
+          if (response->success) {
+            RCLCPP_INFO(this->get_logger(),
+                        "Received spatial data with %zu points",
+                        response->values.size());
+
+            // Process the spatial data here
+            // response->x_coords, response->y_coords, response->values
+
+            // Request terrain map after receiving spatial data
+            request_terrain_map();
+
+          } else {
+            RCLCPP_WARN(this->get_logger(), "Spatial data request failed: %s",
+                        response->message.c_str());
+          }
+        });
   }
 
   void request_terrain_map() {
-    if (!terrain_map_client_->wait_for_service(std::chrono::seconds(1))) {
+    if (!terrain_map_client_->wait_for_service(std::chrono::seconds(0))) {
       RCLCPP_WARN(this->get_logger(), "Terrain map service not available");
       return;
     }
 
-    auto request = std::make_shared<trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty::Request>();
+    RCLCPP_INFO(this->get_logger(), "Requesting terrain map...");
+
+    auto request =
+        std::make_shared<trusses_custom_interfaces::srv::
+                             GetTerrainMapWithUncertainty::Request>();
     // Use parameters from config
     request->width = terrain_width_;
     request->height = terrain_height_;
     request->n_width_cells = terrain_width_cells_;
     request->n_height_cells = terrain_height_cells_;
 
-    auto future = terrain_map_client_->async_send_request(request);
+    RCLCPP_INFO(this->get_logger(),
+                "Requesting terrain map with width: %f, height: %f, "
+                "width_cells: %d, height_cells: %d",
+                request->width, request->height, request->n_width_cells,
+                request->n_height_cells);
 
-    // Wait for the result
-    if (future.wait_for(std::chrono::seconds(5)) == std::future_status::ready) {
-      auto response = future.get();
-      if (response->success) {
-        RCLCPP_INFO(this->get_logger(), "Received terrain map with %zu points", 
-                    response->x_coords.size());
-        
-        // Process the terrain map data here
-        // response->x_coords, response->y_coords, response->values, response->uncertainties
-        process_terrain_map(response);
-      } else {
-        RCLCPP_WARN(this->get_logger(), "Terrain map request failed: %s", 
-                    response->message.c_str());
-      }
-    }
+    // Use callback-based async call
+    terrain_map_client_->async_send_request(
+        request,
+        [this](rclcpp::Client<
+               trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>::
+                   SharedFuture future) {
+          auto response = future.get();
+          if (response->success) {
+            RCLCPP_INFO(this->get_logger(),
+                        "Received terrain map with %zu points",
+                        response->values.size());
+
+            // Process the terrain map data here
+            // response->x_coords, response->y_coords, response->values,
+            // response->uncertainties
+            process_terrain_map(response);
+
+          } else {
+            RCLCPP_WARN(this->get_logger(), "Terrain map request failed: %s",
+                        response->message.c_str());
+          }
+        });
   }
 
-  void process_terrain_map(const std::shared_ptr<trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty::Response> response) {
-    // Update the parameter set D_, mean mu_, and std_ with the new terrain map data
+  void process_terrain_map(
+      const std::shared_ptr<trusses_custom_interfaces::srv::
+                                GetTerrainMapWithUncertainty::Response>
+          response) {
+    // Update the parameter set D_, mean mu_, and std_ with the new terrain map
+    // data
     size_t num_points = response->x_coords.size();
-    
+
     D_.resize(num_points, 2);
     mu_.resize(num_points);
     std_.resize(num_points);
     Q_.resize(num_points, 2);
     S_.resize(num_points);
-    
+
     for (size_t i = 0; i < num_points; ++i) {
       D_(i, 0) = response->x_coords[i];
       D_(i, 1) = response->y_coords[i];
       mu_(i) = response->values[i];
       std_(i) = response->uncertainties[i];
     }
-    
+
     // Recompute sets with new data
     ComputeSets();
-    
-    RCLCPP_INFO(this->get_logger(), "Updated terrain map data with %zu points", num_points);
+
+    RCLCPP_INFO(this->get_logger(), "Updated terrain map data with %zu points",
+                num_points);
   }
 };
 
 int main(int argc, char *argv[]) {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<OptimizerNode>();
-  rclcpp::spin(node);
+  rclcpp::executors::SingleThreadedExecutor executor;
+  executor.add_node(node);
+  executor.spin();
   rclcpp::shutdown();
   return 0;
 }
