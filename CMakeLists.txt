@@ -12,21 +12,28 @@ find_package(eigen3_cmake_module REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(trusses_custom_interfaces REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Add executable
+# Add executables
 add_executable(safe_bayesian_optimization_node src/safe_bayesian_optimization_node.cpp)
+add_executable(goal_point_publisher src/goal_point_publisher.cpp)
 
 # Add dependencies
 
 ament_target_dependencies(
-    safe_bayesian_optimization_node rclcpp trusses_custom_interfaces Eigen3 OpenCV
+    safe_bayesian_optimization_node rclcpp trusses_custom_interfaces Eigen3 OpenCV geometry_msgs
 )
 
-# Install executable
+ament_target_dependencies(
+    goal_point_publisher rclcpp geometry_msgs
+)
+
+# Install executables
 install(TARGETS
   safe_bayesian_optimization_node
+  goal_point_publisher
   DESTINATION lib/${PROJECT_NAME}
 )
 

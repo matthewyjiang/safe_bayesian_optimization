@@ -58,6 +58,12 @@ def generate_launch_description():
             output='screen'
             ),
         Node(
+            package='safe_bayesian_optimization',
+            executable='goal_point_publisher',
+            name='goal_point_publisher',
+            output='screen'
+            ),
+        Node(
             package='foxglove_visualization',  # Replace with the package where FakeDataPublisher is defined
             executable='fake_data_publisher',  # Replace with the executable name of FakeDataPublisher
             name='fake_data_publisher',

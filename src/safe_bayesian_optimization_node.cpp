@@ -1,7 +1,9 @@
 #include "trusses_custom_interfaces/srv/get_terrain_map_with_uncertainty.hpp"
 #include "trusses_custom_interfaces/srv/spatial_data.hpp"
 #include <Eigen/Dense>
+#include <cmath>
 #include <geometry_msgs/msg/point.hpp>
+#include <limits>
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <ratio>
@@ -38,6 +40,12 @@ public:
         trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>(
         "get_terrain_map_with_uncertainty");
 
+    // Create subscriber
+    goal_point_sub_ = this->create_subscription<geometry_msgs::msg::Point>(
+        "goal_point", 10,
+        std::bind(&OptimizerNode::goal_point_callback, this,
+                  std::placeholders::_1));
+
     // Create publisher
     current_subgoal_pub_ = this->create_publisher<geometry_msgs::msg::Point>(
         "current_subgoal", 10);
@@ -68,6 +76,7 @@ private:
   rclcpp::Client<trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>::
       SharedPtr terrain_map_client_;
   rclcpp::TimerBase::SharedPtr spatial_data_timer_;
+  rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr goal_point_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr current_subgoal_pub_;
 
   // Parameters from config
@@ -75,6 +84,9 @@ private:
   double terrain_height_;
   int terrain_width_cells_;
   int terrain_height_cells_;
+
+  // Current goal point
+  geometry_msgs::msg::Point current_goal_;
 
   void ComputeSets() {
     // Compute the confidence intervals
@@ -159,12 +171,28 @@ private:
       return -1;
     }
 
-    // TODO: Implement selection algorithm on frontier_indices
-    // For now, return the first frontier index as placeholder
-    RCLCPP_INFO(this->get_logger(), "Found %lu frontier points for selection",
-                frontier_indices.size());
+    // Extract frontier points
+    Eigen::MatrixXd frontier_points(frontier_indices.size(), 2);
+    Eigen::VectorXd frontier_confidence_width(frontier_indices.size());
+    
+    for (size_t i = 0; i < frontier_indices.size(); ++i) {
+      int idx = frontier_indices[i];
+      frontier_points.row(i) = D_.row(idx);
+      frontier_confidence_width(i) = Q_(idx, 1) - Q_(idx, 0);
+    }
+    
+    Eigen::VectorXd goal_point(2);
+    goal_point << current_goal_.x, current_goal_.y;
+    
+    Eigen::VectorXd distances =
+        (frontier_points.rowwise() - goal_point.transpose()).rowwise().norm();
 
-    return frontier_indices[0];
+    Eigen::VectorXd scores =
+        distances.array() / (frontier_confidence_width.array() + 1e-6);
+    int best_index;
+    scores.minCoeff(&best_index);
+
+    return frontier_indices[best_index];
   }
 
   void check_spatial_data() {
@@ -195,6 +223,23 @@ private:
 
             // Request terrain map after receiving spatial data
             request_terrain_map();
+
+            // get the next subgoal
+
+            int next_subgoal_index = GetNextSubgoal();
+            if (next_subgoal_index >= 0) {
+              geometry_msgs::msg::Point subgoal;
+              subgoal.x = response->x_array[next_subgoal_index];
+              subgoal.y = response->y_array[next_subgoal_index];
+              subgoal.z = 0.0; // Assuming 2D data, set z to 0
+
+              current_subgoal_pub_->publish(subgoal);
+              RCLCPP_INFO(this->get_logger(),
+                          "Published next subgoal: (%f, %f)", subgoal.x,
+                          subgoal.y);
+            } else {
+              RCLCPP_WARN(this->get_logger(), "No valid subgoal found");
+            }
 
           } else {
             RCLCPP_WARN(this->get_logger(), "Spatial data request failed: %s",
@@ -234,9 +279,6 @@ private:
                    SharedFuture future) {
           auto response = future.get();
           if (response->success) {
-            RCLCPP_INFO(this->get_logger(),
-                        "Received terrain map with %zu points",
-                        response->values.size());
 
             // Process the terrain map data here
             // response->x_coords, response->y_coords, response->values,
@@ -273,9 +315,12 @@ private:
 
     // Recompute sets with new data
     ComputeSets();
+  }
 
-    RCLCPP_INFO(this->get_logger(), "Updated terrain map data with %zu points",
-                num_points);
+  void goal_point_callback(const geometry_msgs::msg::Point::SharedPtr msg) {
+    current_goal_ = *msg;
+    RCLCPP_INFO(this->get_logger(), "Received goal point: (%.2f, %.2f)", msg->x,
+                msg->y);
   }
 };
 
