@@ -5,29 +5,96 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# Set C++ standard for CGAL library
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
 find_package(Eigen3 REQUIRED)
-find_package(OpenCV REQUIRED)
 find_package(trusses_custom_interfaces REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(OpenCV REQUIRED)
+find_package(Boost REQUIRED COMPONENTS system)
+find_package(CGAL REQUIRED COMPONENTS Core)
+find_package(PCL 1.12 REQUIRED COMPONENTS common io surface)
+find_package(Qhull REQUIRED)
 
+add_definitions(${PCL_DEFINITIONS})
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Generate custom messages
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/PolygonArray.msg"
+  DEPENDENCIES geometry_msgs
+)
+
+ament_export_include_directories(
+  include
+)
+
+include_directories(
+  include
+  ${PCL_INCLUDE_DIRS}
+)
+
+link_directories(
+  ${PCL_LIBRARY_DIRS}
+)
+
+add_definitions(
+  ${PCL_DEFINITIONS}
+)
+
+
+add_library(reactive_planner
+    src/libraries/polygeom_lib.cpp
+    src/libraries/reactive_planner_lib.cpp
+)
 
 # Add executables
 add_executable(safe_bayesian_optimization_node src/safe_bayesian_optimization_node.cpp)
 add_executable(goal_point_publisher src/goal_point_publisher.cpp)
 
 # Add dependencies
-
 ament_target_dependencies(
-    safe_bayesian_optimization_node rclcpp trusses_custom_interfaces Eigen3 OpenCV geometry_msgs
+    safe_bayesian_optimization_node rclcpp trusses_custom_interfaces Eigen3 geometry_msgs sensor_msgs cv_bridge PCL Boost OpenCV CGAL
 )
+
+target_link_libraries(reactive_planner
+  ${Boost_LIBRARIES}
+  CGAL::CGAL
+  CGAL::CGAL_Core
+)
+
+target_link_libraries(
+    safe_bayesian_optimization_node
+    ${PCL_LIBRARIES}
+    ${Boost_LIBRARIES}
+    ${OpenCV_LIBS}
+    Qhull::qhullcpp
+    Qhull::qhull_r
+    CGAL::CGAL
+    CGAL::CGAL_Core
+    reactive_planner
+)
+
+target_include_directories(safe_bayesian_optimization_node PRIVATE ${PCL_INCLUDE_DIRS})
+
+rosidl_target_interfaces(safe_bayesian_optimization_node
+  ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
 ament_target_dependencies(
     goal_point_publisher rclcpp geometry_msgs
+)
+
+ament_target_dependencies(
+    reactive_planner rclcpp geometry_msgs CGAL Boost
 )
 
 # Install executables
@@ -36,6 +103,14 @@ install(TARGETS
   goal_point_publisher
   DESTINATION lib/${PROJECT_NAME}
 )
+
+# Install library
+install(TARGETS
+  reactive_planner
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+)
+
 
 # Install launch files
 install(DIRECTORY

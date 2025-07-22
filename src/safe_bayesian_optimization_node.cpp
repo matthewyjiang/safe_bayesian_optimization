@@ -1,19 +1,43 @@
+#include "safe_bayesian_optimization/msg/polygon_array.hpp"
 #include "trusses_custom_interfaces/srv/get_terrain_map_with_uncertainty.hpp"
 #include "trusses_custom_interfaces/srv/spatial_data.hpp"
+#include <CGAL/Alpha_shape_2.h>
+#include <CGAL/Alpha_shape_face_base_2.h>
+#include <CGAL/Alpha_shape_vertex_base_2.h>
+#include <CGAL/Delaunay_triangulation_2.h>
+#include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
+#include <CGAL/Triangulation_data_structure_2.h>
 #include <Eigen/Dense>
+#include <array>
+#include <boost/geometry.hpp>
+#include <boost/geometry/algorithms/detail/envelope/interface.hpp>
+#include <boost/geometry/algorithms/difference.hpp>
+#include <boost/geometry/geometries/box.hpp>
+#include <boost/geometry/geometries/multi_polygon.hpp>
+#include <boost/geometry/geometries/polygon.hpp>
 #include <cmath>
+#include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/msg/point.hpp>
+#include <geometry_msgs/msg/polygon.hpp>
+#include <libqhullcpp/Qhull.h>
+#include <libqhullcpp/QhullFacetList.h>
+#include <libqhullcpp/QhullVertexSet.h>
 #include <limits>
 #include <memory>
 #include <opencv2/opencv.hpp>
+#include <unordered_map>
+
 #include <ratio>
 #include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/image.hpp>
 
 #include <vector>
 
+namespace bg = boost::geometry;
+
 class OptimizerNode : public rclcpp::Node {
 public:
-  OptimizerNode() : Node("optimizer_node"), last_data_length_(0) {
+  OptimizerNode() : Node("optimizer_node") {
     // Declare parameters
     this->declare_parameter("opt.beta", 2.0);
     this->declare_parameter("opt.f_min", 0.0);
@@ -21,6 +45,7 @@ public:
     this->declare_parameter("terrain_map.height", 2.0);
     this->declare_parameter("terrain_map.width_cells", 20);
     this->declare_parameter("terrain_map.height_cells", 20);
+    this->declare_parameter("debug.publish_debug_image", false);
 
     // Read parameters
     beta_ = this->get_parameter("opt.beta").as_double();
@@ -31,6 +56,7 @@ public:
         this->get_parameter("terrain_map.width_cells").as_int();
     terrain_height_cells_ =
         this->get_parameter("terrain_map.height_cells").as_int();
+    publish_debug_image_ = this->get_parameter("debug.publish_debug_image").as_bool();
 
     // Create service clients
     spatial_data_client_ =
@@ -46,9 +72,18 @@ public:
         std::bind(&OptimizerNode::goal_point_callback, this,
                   std::placeholders::_1));
 
-    // Create publisher
+    // Create publishers
     current_subgoal_pub_ = this->create_publisher<geometry_msgs::msg::Point>(
         "current_subgoal", 10);
+    polygons_pub_ =
+        this->create_publisher<safe_bayesian_optimization::msg::PolygonArray>(
+            "polygon_array", 10);
+    
+    // Only create debug image publisher if enabled
+    if (publish_debug_image_) {
+      debug_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>(
+          "debug_polygons_image", 10);
+    }
 
     // Create timer to check spatial data periodically
     spatial_data_timer_ = this->create_wall_timer(
@@ -70,7 +105,6 @@ private:
   double f_min_;
 
   // Spatial data monitoring
-  size_t last_data_length_;
   rclcpp::Client<trusses_custom_interfaces::srv::SpatialData>::SharedPtr
       spatial_data_client_;
   rclcpp::Client<trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>::
@@ -78,12 +112,16 @@ private:
   rclcpp::TimerBase::SharedPtr spatial_data_timer_;
   rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr goal_point_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr current_subgoal_pub_;
+  rclcpp::Publisher<safe_bayesian_optimization::msg::PolygonArray>::SharedPtr
+      polygons_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
 
   // Parameters from config
   double terrain_width_;
   double terrain_height_;
   int terrain_width_cells_;
   int terrain_height_cells_;
+  bool publish_debug_image_;
 
   // Current goal point
   geometry_msgs::msg::Point current_goal_;
@@ -92,6 +130,8 @@ private:
     // Compute the confidence intervals
     ComputeConfidenceIntervals();
 
+    // Debug print mu std, q and fmin
+
     // Update the safe set based on the confidence intervals
     UpdateSafeSet();
   }
@@ -99,7 +139,7 @@ private:
   void UpdateSafeSet() { S_ = Q_.col(0).array() > f_min_; }
 
   void ComputeConfidenceIntervals() {
-    Eigen::VectorXd confidence = beta_ * std_;
+    const Eigen::VectorXd confidence = beta_ * std_;
 
     Q_.col(0) = mu_ - confidence;
     Q_.col(1) = mu_ + confidence;
@@ -110,6 +150,12 @@ private:
       RCLCPP_WARN(this->get_logger(), "D_ or S_ is empty");
       return {};
     }
+
+    // count S_ that is true
+
+    int safe_count = S_.count();
+    RCLCPP_INFO(this->get_logger(), "Number of safe points: %d", safe_count);
+    RCLCPP_INFO(this->get_logger(), "Total points in S_: %ld", S_.size());
 
     // Find grid bounds
     int min_x = static_cast<int>(D_.col(0).minCoeff());
@@ -138,20 +184,30 @@ private:
     cv::findContours(safety_image, contours, hierarchy, cv::RETR_EXTERNAL,
                      cv::CHAIN_APPROX_NONE);
 
-    // Convert contour points back to original indices
+    RCLCPP_INFO(this->get_logger(), "Found %lu contours", contours.size());
+
+    // Convert contour points back to original indices using a hash map for O(1) lookup
+    std::unordered_map<int, std::unordered_map<int, int>> coord_to_index;
+    for (int i = 0; i < D_.rows(); ++i) {
+      int x = static_cast<int>(D_(i, 0));
+      int y = static_cast<int>(D_(i, 1));
+      coord_to_index[x][y] = i;
+    }
+
     std::vector<int> contour_indices;
+    contour_indices.reserve(contours.size() * 50); // Reserve reasonable capacity
 
     for (const auto &contour : contours) {
       for (const auto &point : contour) {
         int orig_x = point.x + min_x;
         int orig_y = point.y + min_y;
 
-        // Find the index in D_ that matches this point
-        for (int i = 0; i < D_.rows(); ++i) {
-          if (static_cast<int>(D_(i, 0)) == orig_x &&
-              static_cast<int>(D_(i, 1)) == orig_y) {
-            contour_indices.push_back(i);
-            break;
+        // O(1) lookup instead of O(n) search
+        auto x_it = coord_to_index.find(orig_x);
+        if (x_it != coord_to_index.end()) {
+          auto y_it = x_it->second.find(orig_y);
+          if (y_it != x_it->second.end()) {
+            contour_indices.push_back(y_it->second);
           }
         }
       }
@@ -164,7 +220,7 @@ private:
 
   int GetNextSubgoal() {
     // Get frontier indices
-    std::vector<int> frontier_indices = FindSafetyContourIndices();
+    const std::vector<int> frontier_indices = FindSafetyContourIndices();
 
     if (frontier_indices.empty()) {
       RCLCPP_WARN(this->get_logger(), "No frontier points found");
@@ -172,22 +228,22 @@ private:
     }
 
     // Extract frontier points
-    Eigen::MatrixXd frontier_points(frontier_indices.size(), 2);
-    Eigen::VectorXd frontier_confidence_width(frontier_indices.size());
-    
-    for (size_t i = 0; i < frontier_indices.size(); ++i) {
-      int idx = frontier_indices[i];
+    const size_t num_frontiers = frontier_indices.size();
+    Eigen::MatrixXd frontier_points(num_frontiers, 2);
+    Eigen::VectorXd frontier_confidence_width(num_frontiers);
+
+    for (size_t i = 0; i < num_frontiers; ++i) {
+      const int idx = frontier_indices[i];
       frontier_points.row(i) = D_.row(idx);
       frontier_confidence_width(i) = Q_(idx, 1) - Q_(idx, 0);
     }
-    
-    Eigen::VectorXd goal_point(2);
-    goal_point << current_goal_.x, current_goal_.y;
-    
-    Eigen::VectorXd distances =
+
+    const Eigen::VectorXd goal_point = (Eigen::VectorXd(2) << current_goal_.x, current_goal_.y).finished();
+
+    const Eigen::VectorXd distances =
         (frontier_points.rowwise() - goal_point.transpose()).rowwise().norm();
 
-    Eigen::VectorXd scores =
+    const Eigen::VectorXd scores =
         distances.array() / (frontier_confidence_width.array() + 1e-6);
     int best_index;
     scores.minCoeff(&best_index);
@@ -223,23 +279,6 @@ private:
 
             // Request terrain map after receiving spatial data
             request_terrain_map();
-
-            // get the next subgoal
-
-            int next_subgoal_index = GetNextSubgoal();
-            if (next_subgoal_index >= 0) {
-              geometry_msgs::msg::Point subgoal;
-              subgoal.x = response->x_array[next_subgoal_index];
-              subgoal.y = response->y_array[next_subgoal_index];
-              subgoal.z = 0.0; // Assuming 2D data, set z to 0
-
-              current_subgoal_pub_->publish(subgoal);
-              RCLCPP_INFO(this->get_logger(),
-                          "Published next subgoal: (%f, %f)", subgoal.x,
-                          subgoal.y);
-            } else {
-              RCLCPP_WARN(this->get_logger(), "No valid subgoal found");
-            }
 
           } else {
             RCLCPP_WARN(this->get_logger(), "Spatial data request failed: %s",
@@ -293,12 +332,12 @@ private:
   }
 
   void process_terrain_map(
-      const std::shared_ptr<trusses_custom_interfaces::srv::
+      const std::shared_ptr<const trusses_custom_interfaces::srv::
                                 GetTerrainMapWithUncertainty::Response>
           response) {
     // Update the parameter set D_, mean mu_, and std_ with the new terrain map
     // data
-    size_t num_points = response->x_coords.size();
+    const size_t num_points = response->x_coords.size();
 
     D_.resize(num_points, 2);
     mu_.resize(num_points);
@@ -315,12 +354,291 @@ private:
 
     // Recompute sets with new data
     ComputeSets();
+
+    // get the next subgoal
+
+    const int next_subgoal_index = GetNextSubgoal();
+    if (next_subgoal_index >= 0) {
+      geometry_msgs::msg::Point subgoal;
+      subgoal.x = response->x_coords[next_subgoal_index];
+      subgoal.y = response->y_coords[next_subgoal_index];
+      subgoal.z = 0.0; // Assuming 2D data, set z to 0
+
+      current_subgoal_pub_->publish(subgoal);
+      RCLCPP_INFO(this->get_logger(), "Published next subgoal: (%f, %f)",
+                  subgoal.x, subgoal.y);
+    } else {
+      RCLCPP_WARN(this->get_logger(), "No valid subgoal found");
+    }
+    publish_obstacle_polygons();
+  }
+
+  void publish_obstacle_polygons() {
+
+    // Use CGAL Alpha Shape instead of concaveman
+    typedef CGAL::Exact_predicates_inexact_constructions_kernel K;
+    typedef CGAL::Alpha_shape_vertex_base_2<K> Vb;
+    typedef CGAL::Alpha_shape_face_base_2<K> Fb;
+    typedef CGAL::Triangulation_data_structure_2<Vb, Fb> Tds;
+    typedef CGAL::Delaunay_triangulation_2<K, Tds> Triangulation_2;
+    typedef CGAL::Alpha_shape_2<Triangulation_2> Alpha_shape_2;
+    typedef K::Point_2 Point_2;
+
+    // Convert points to CGAL format - reserve capacity based on safe point count
+    int safe_count = S_.count();
+    if (safe_count == 0) {
+      RCLCPP_WARN(this->get_logger(), "No safe points available for polygon generation");
+      return;
+    }
+    
+    std::vector<Point_2> cgal_points;
+    cgal_points.reserve(safe_count);
+    for (int i = 0; i < D_.rows(); ++i) {
+      if (S_(i)) { // Only consider safe points
+        cgal_points.emplace_back(D_(i, 0), D_(i, 1));
+      }
+    }
+
+    // Create alpha shape
+    Alpha_shape_2 alpha_shape(cgal_points.begin(), cgal_points.end());
+
+    // Set alpha shape to regularized mode for better boundary extraction
+    alpha_shape.set_mode(Alpha_shape_2::REGULARIZED);
+
+    // Find optimal alpha value (can be adjusted based on your needs)
+    // Using a small alpha to get a detailed boundary
+    auto alpha_iterator = alpha_shape.find_optimal_alpha(1);
+    if (alpha_iterator != alpha_shape.alpha_end()) {
+        alpha_shape.set_alpha(*alpha_iterator);
+    } else {
+        // Fallback to a reasonable alpha value
+        alpha_shape.set_alpha(0.1);
+    }
+
+    // Extract boundary edges and create ordered boundary
+    std::vector<std::array<double, 2>> alpha_shape_boundary;
+    alpha_shape_boundary.reserve(safe_count / 4); // Estimate boundary size
+
+    // Collect boundary edges - reserve estimated capacity
+    std::vector<typename Alpha_shape_2::Edge> boundary_edges;
+    boundary_edges.reserve(safe_count / 2); // Conservative estimate
+    for (auto edge_it = alpha_shape.alpha_shape_edges_begin();
+         edge_it != alpha_shape.alpha_shape_edges_end(); ++edge_it) {
+      boundary_edges.push_back(*edge_it);
+    }
+
+    // Create boost geometry polygon from alpha shape boundary
+    bg::model::polygon<bg::model::d2::point_xy<double>> concave_polygon;
+
+    if (!boundary_edges.empty()) {
+      // Create a properly ordered boundary by traversing edges
+      std::vector<Point_2> ordered_boundary;
+      ordered_boundary.reserve(boundary_edges.size()); // Reserve capacity
+      std::map<Point_2, std::vector<Point_2>> adjacency_map;
+      
+      // Build adjacency map from boundary edges
+      for (const auto &edge : boundary_edges) {
+        auto face = edge.first;
+        int idx = edge.second;
+
+        Point_2 p1 = face->vertex((idx + 1) % 3)->point();
+        Point_2 p2 = face->vertex((idx + 2) % 3)->point();
+
+        adjacency_map[p1].push_back(p2);
+        adjacency_map[p2].push_back(p1);
+      }
+      
+      // Traverse the boundary to create ordered polygon
+      if (!adjacency_map.empty()) {
+        std::set<Point_2> visited;
+        Point_2 start_point = adjacency_map.begin()->first;
+        Point_2 current = start_point;
+        
+        do {
+          ordered_boundary.push_back(current);
+          visited.insert(current);
+          
+          // Find next unvisited neighbor
+          Point_2 next = current; // fallback
+          for (const auto &neighbor : adjacency_map[current]) {
+            if (visited.find(neighbor) == visited.end() || 
+                (neighbor == start_point && ordered_boundary.size() > 2)) {
+              next = neighbor;
+              break;
+            }
+          }
+          
+          current = next;
+        } while (current != start_point && visited.find(current) == visited.end() && 
+                 ordered_boundary.size() < adjacency_map.size());
+      }
+
+      // Convert ordered boundary to boost geometry polygon
+      for (const auto &point : ordered_boundary) {
+        bg::append(concave_polygon.outer(),
+                   bg::model::d2::point_xy<double>(CGAL::to_double(point.x()),
+                                                   CGAL::to_double(point.y())));
+        alpha_shape_boundary.push_back(
+            {CGAL::to_double(point.x()), CGAL::to_double(point.y())});
+      }
+    } else {
+      // Fallback: if no alpha shape boundary, use convex hull
+      RCLCPP_WARN(this->get_logger(),
+                  "No alpha shape boundary found, using all safe points");
+      for (const auto &point : cgal_points) {
+        bg::append(concave_polygon.outer(),
+                   bg::model::d2::point_xy<double>(CGAL::to_double(point.x()),
+                                                   CGAL::to_double(point.y())));
+        alpha_shape_boundary.push_back(
+            {CGAL::to_double(point.x()), CGAL::to_double(point.y())});
+      }
+    }
+
+    bg::correct(concave_polygon);
+
+    bg::model::box<bg::model::d2::point_xy<double>> envelope_box;
+    bg::envelope(concave_polygon, envelope_box);
+
+    bg::model::multi_polygon<
+        bg::model::polygon<bg::model::d2::point_xy<double>>>
+        obstacle_polygons;
+
+    bg::difference(envelope_box, concave_polygon, obstacle_polygons);
+
+    safe_bayesian_optimization::msg::PolygonArray polygon_array_msg;
+    for (const auto &polygon : obstacle_polygons) {
+      geometry_msgs::msg::Polygon msg_polygon;
+      for (const auto &point : polygon.outer()) {
+        geometry_msgs::msg::Point32 p;
+        p.x = point.get<0>();
+        p.y = point.get<1>();
+        msg_polygon.points.push_back(p);
+      }
+      polygon_array_msg.polygons.push_back(msg_polygon);
+    }
+    polygons_pub_->publish(polygon_array_msg);
+
+    // Publish debug visualization image if enabled
+    if (publish_debug_image_ && debug_image_pub_) {
+      publish_debug_image(obstacle_polygons, alpha_shape_boundary);
+    }
+  }
+
+  void
+  publish_debug_image(const bg::model::multi_polygon<
+                          bg::model::polygon<bg::model::d2::point_xy<double>>>
+                          &obstacle_polygons,
+                      const std::vector<std::array<double, 2>> &safe_hull) {
+    // Calculate image bounds from terrain parameters
+    double x_min = -terrain_width_ / 2.0;
+    double x_max = terrain_width_ / 2.0;
+    double y_min = -terrain_height_ / 2.0;
+    double y_max = terrain_height_ / 2.0;
+
+    // Image size - use higher resolution for better visualization
+    int img_width = 800;
+    int img_height = 600;
+
+    // Create debug image
+    cv::Mat debug_img = cv::Mat::zeros(img_height, img_width, CV_8UC3);
+
+    // Helper function to convert world coordinates to image coordinates
+    auto world_to_image = [&](double world_x, double world_y) -> cv::Point {
+      int img_x =
+          static_cast<int>((world_x - x_min) / (x_max - x_min) * img_width);
+      int img_y = static_cast<int>((1.0 - (world_y - y_min) / (y_max - y_min)) *
+                                   img_height);
+      return cv::Point(img_x, img_y);
+    };
+
+    // Draw concave hull of safe set using pre-computed hull
+    if (safe_hull.size() > 2) {
+      std::vector<cv::Point> hull_img_points;
+      hull_img_points.reserve(safe_hull.size()); // Reserve capacity
+      
+      for (const auto &point : safe_hull) {
+        cv::Point img_point = world_to_image(point[0], point[1]);
+        // Only add points within image bounds
+        if (img_point.x >= 0 && img_point.x < img_width && 
+            img_point.y >= 0 && img_point.y < img_height) {
+          hull_img_points.push_back(img_point);
+        }
+      }
+
+      if (hull_img_points.size() > 2) {
+        const cv::Point *pts = hull_img_points.data();
+        int npts = hull_img_points.size();
+        cv::fillPoly(debug_img, &pts, &npts, 1, cv::Scalar(0, 150, 0));
+        cv::polylines(debug_img, hull_img_points, true, cv::Scalar(0, 255, 0), 2);
+      }
+    }
+
+    // Draw safe region as circles
+
+    for (int i = 0; i < D_.rows(); ++i) {
+      if (S_(i)) {
+        cv::Point img_point = world_to_image(D_(i, 0), D_(i, 1));
+        if (img_point.x >= 0 && img_point.x < img_width && img_point.y >= 0 &&
+            img_point.y < img_height) {
+          cv::circle(debug_img, img_point, 3, cv::Scalar(255, 0, 0), -1);
+        }
+      }
+    }
+
+    // Draw obstacle polygons in blue
+    for (const auto &polygon : obstacle_polygons) {
+      const auto &outer_ring = polygon.outer();
+      if (outer_ring.size() < 3) continue; // Skip invalid polygons
+      
+      std::vector<cv::Point> cv_points;
+      cv_points.reserve(outer_ring.size()); // Reserve capacity
+      
+      for (const auto &point : outer_ring) {
+        cv::Point img_point = world_to_image(point.get<0>(), point.get<1>());
+        cv_points.push_back(img_point);
+      }
+
+      if (cv_points.size() > 2) {
+        const cv::Point *pts = cv_points.data();
+        int npts = static_cast<int>(cv_points.size());
+        cv::fillPoly(debug_img, &pts, &npts, 1, cv::Scalar(255, 100, 0));
+        cv::polylines(debug_img, cv_points, true, cv::Scalar(255, 255, 0), 2);
+      }
+    }
+
+    // // Draw current goal in magenta if available
+    // if (current_goal_.x != 0.0 || current_goal_.y != 0.0) {
+    //   cv::Point goal_img = world_to_image(current_goal_.x, current_goal_.y);
+    //   if (goal_img.x >= 0 && goal_img.x < img_width &&
+    //       goal_img.y >= 0 && goal_img.y < img_height) {
+    //     cv::circle(debug_img, goal_img, 8, cv::Scalar(255, 0, 255), -1);
+    //     cv::circle(debug_img, goal_img, 12, cv::Scalar(255, 255, 255), 2);
+    //   }
+    // }
+
+    // Add legend
+    cv::putText(debug_img, "Safe concave hull (green)", cv::Point(10, 30),
+                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0, 255, 0), 2);
+    cv::putText(debug_img, "Obstacles (blue)", cv::Point(10, 55),
+                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 100, 0), 2);
+    cv::putText(debug_img, "Goal (magenta)", cv::Point(10, 80),
+                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 0, 255), 2);
+
+    // Convert OpenCV image to ROS image message
+    std_msgs::msg::Header header;
+    header.stamp = this->now();
+    header.frame_id = "map";
+
+    sensor_msgs::msg::Image::SharedPtr img_msg =
+        cv_bridge::CvImage(header, "bgr8", debug_img).toImageMsg();
+
+    debug_image_pub_->publish(*img_msg);
+
+    RCLCPP_DEBUG(this->get_logger(), "Published debug visualization image");
   }
 
   void goal_point_callback(const geometry_msgs::msg::Point::SharedPtr msg) {
     current_goal_ = *msg;
-    RCLCPP_INFO(this->get_logger(), "Received goal point: (%.2f, %.2f)", msg->x,
-                msg->y);
   }
 };
 

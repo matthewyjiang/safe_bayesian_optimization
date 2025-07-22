@@ -50,26 +50,20 @@ def generate_launch_description():
 
     return LaunchDescription([
         config_file_arg, 
-        Node(
+         Node(
             package='safe_bayesian_optimization',
-            executable='safe_bayesian_optimization_node',
-            name='safe_bayesian_optimization_node',
-            parameters=[LaunchConfiguration('config_file')],
-            output='screen'
-            ),
-        Node(
-            package='safe_bayesian_optimization',
-            executable='goal_point_publisher',
-            name='goal_point_publisher',
-            output='screen'
-            ),
-        Node(
-            package='foxglove_visualization',  # Replace with the package where FakeDataPublisher is defined
-            executable='fake_data_publisher',  # Replace with the executable name of FakeDataPublisher
-            name='fake_data_publisher',
-            output='screen'
-        ),
-        Node(
+             executable='safe_bayesian_optimization_node',
+             name='safe_bayesian_optimization_node',
+             parameters=[LaunchConfiguration('config_file')],
+             output='screen'
+             ),
+         Node(
+             package='safe_bayesian_optimization',
+             executable='goal_point_publisher',
+             name='goal_point_publisher',
+             output='screen'
+             ),
+                Node(
             package='foxglove_visualization',  # Replace with the package where Foxglove is defined
             executable='visualizer',  # Replace with the executable name of Foxglove
             name='visualizer',
@@ -80,6 +74,12 @@ def generate_launch_description():
             package='foxglove_visualization',  # Replace with the package where FakeDataPublisher is defined
             executable='leg_measurements_publisher',  # Replace with the executable name of FakeDataPublisher
             name='leg_measurements_publisher',
+            output='screen'
+        ),
+        Node(
+            package='foxglove_visualization',  # Replace with the package where FakeDataPublisher is defined
+            executable='fake_data_publisher',  # Replace with the executable name of FakeDataPublisher
+            name='fake_data_publisher',
             output='screen'
         ),
         Node(
