@@ -1,3 +1,6 @@
+#ifndef POLYGEOM_LIB_H
+#define POLYGEOM_LIB_H
+
 // MIT License (modified)
 
 // Copyright (c) 2020 The Trustees of the University of Pennsylvania
@@ -313,3 +316,5 @@ void polyconvexdecomposition(std::vector<std::vector<double>> xy,
                              std::vector<std::vector<double>> workspace,
                              bool touching_boundary,
                              std::vector<PolygonClass> *tree);
+
+#endif // POLYGEOM_LIB_H

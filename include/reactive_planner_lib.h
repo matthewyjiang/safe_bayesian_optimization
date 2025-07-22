@@ -1,3 +1,6 @@
+#ifndef REACTIVE_PLANNER_LIB_H
+#define REACTIVE_PLANNER_LIB_H
+
 // MIT License (modified)
 
 // Copyright (c) 2020 The Trustees of the University of Pennsylvania
@@ -150,6 +153,17 @@ public:
     this->workspace = workspace_in;
   }
 
+  void set_all_params(double p_in, double epsilon_in, double varepsilon_in,
+                      double mu_1_in, double mu_2_in,
+                      std::vector<std::vector<double>> workspace_in) {
+    this->p = p_in;
+    this->epsilon = epsilon_in;
+    this->varepsilon = varepsilon_in;
+    this->mu_1 = mu_1_in;
+    this->mu_2 = mu_2_in;
+    this->workspace = workspace_in;
+  }
+
 private:
   double p;
   double epsilon;
@@ -229,3 +243,5 @@ OutputStructScalar triangleInsideImplicit(std::vector<double> Position,
 OutputStructScalar polygonInsideImplicit(std::vector<double> Position,
                                          PolygonClass PolygonUsed,
                                          DiffeoParamsClass DiffeoParams);
+
+#endif // REACTIVE_PLANNER_LIB_H

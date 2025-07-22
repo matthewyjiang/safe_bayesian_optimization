@@ -79,6 +79,9 @@ public:
         this->create_publisher<safe_bayesian_optimization::msg::PolygonArray>(
             "polygon_array", 10);
     
+    envelope_pub_ = this->create_publisher<geometry_msgs::msg::Polygon>(
+        "envelope_polygon", 10);
+    
     // Only create debug image publisher if enabled
     if (publish_debug_image_) {
       debug_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>(
@@ -114,6 +117,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr current_subgoal_pub_;
   rclcpp::Publisher<safe_bayesian_optimization::msg::PolygonArray>::SharedPtr
       polygons_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::Polygon>::SharedPtr envelope_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
 
   // Parameters from config
@@ -498,6 +502,28 @@ private:
 
     bg::model::box<bg::model::d2::point_xy<double>> envelope_box;
     bg::envelope(concave_polygon, envelope_box);
+
+    // Publish envelope polygon
+    geometry_msgs::msg::Polygon envelope_msg;
+    geometry_msgs::msg::Point32 min_corner, max_corner;
+    min_corner.x = envelope_box.min_corner().get<0>();
+    min_corner.y = envelope_box.min_corner().get<1>();
+    max_corner.x = envelope_box.max_corner().get<0>();
+    max_corner.y = envelope_box.max_corner().get<1>();
+    
+    // Create rectangle from envelope box
+    envelope_msg.points.push_back(min_corner);
+    geometry_msgs::msg::Point32 bottom_right;
+    bottom_right.x = max_corner.x;
+    bottom_right.y = min_corner.y;
+    envelope_msg.points.push_back(bottom_right);
+    envelope_msg.points.push_back(max_corner);
+    geometry_msgs::msg::Point32 top_left;
+    top_left.x = min_corner.x;
+    top_left.y = max_corner.y;
+    envelope_msg.points.push_back(top_left);
+    
+    envelope_pub_->publish(envelope_msg);
 
     bg::model::multi_polygon<
         bg::model::polygon<bg::model::d2::point_xy<double>>>

@@ -17,6 +17,10 @@ find_package(Eigen3 REQUIRED)
 find_package(trusses_custom_interfaces REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(OpenCV REQUIRED)
@@ -60,6 +64,7 @@ add_library(reactive_planner
 # Add executables
 add_executable(safe_bayesian_optimization_node src/safe_bayesian_optimization_node.cpp)
 add_executable(goal_point_publisher src/goal_point_publisher.cpp)
+add_executable(reactive_navigation_node src/reactive_navigation_node.cpp)
 
 # Add dependencies
 ament_target_dependencies(
@@ -84,13 +89,26 @@ target_link_libraries(
     reactive_planner
 )
 
+target_link_libraries(
+    reactive_navigation_node
+    ${Boost_LIBRARIES}
+    reactive_planner
+)
+
 target_include_directories(safe_bayesian_optimization_node PRIVATE ${PCL_INCLUDE_DIRS})
 
 rosidl_target_interfaces(safe_bayesian_optimization_node
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
+rosidl_target_interfaces(reactive_navigation_node
+  ${PROJECT_NAME} "rosidl_typesupport_cpp")
+
 ament_target_dependencies(
     goal_point_publisher rclcpp geometry_msgs
+)
+
+ament_target_dependencies(
+    reactive_navigation_node rclcpp geometry_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs Boost
 )
 
 ament_target_dependencies(
@@ -101,6 +119,7 @@ ament_target_dependencies(
 install(TARGETS
   safe_bayesian_optimization_node
   goal_point_publisher
+  reactive_navigation_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

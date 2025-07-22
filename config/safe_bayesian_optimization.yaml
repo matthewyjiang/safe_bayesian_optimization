@@ -12,6 +12,15 @@ safe_bayesian_optimization_node:
       width_cells: 300
       height_cells: 300
       
+    # Reactive planner diffeomorphism parameters
+    reactive_planner:
+      p: 2.0                    # R-function exponent
+      epsilon: 0.1              # Distance for the switches
+      varepsilon: 0.05          # Distance allowed to dilate the polygon
+      mu_1: 1.0                 # Switch exponent mu1
+      mu_2: 1.0                 # Switch exponent mu2
+      robot_radius: 0.3         # Robot radius for collision avoidance (meters)
+      
     # Debug configuration
     debug:
       publish_debug_image: false
