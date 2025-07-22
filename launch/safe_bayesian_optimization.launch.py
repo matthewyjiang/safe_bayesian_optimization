@@ -25,6 +25,16 @@ def generate_launch_description():
                 ]),
             description='Path to the configuration file'
             )
+    
+    reactive_planner_config_arg = DeclareLaunchArgument(
+            'reactive_planner_config',
+            default_value=PathJoinSubstitution([
+                FindPackageShare('safe_bayesian_optimization'),
+                'config',
+                'reactive_planner.yaml'
+                ]),
+            description='Path to the reactive planner configuration file'
+            )
 
     yaml_dir = get_package_share_directory("safe_bayesian_optimization")
     config_file = os.path.join(yaml_dir, 'config/lpsc.yaml')
@@ -49,12 +59,13 @@ def generate_launch_description():
             )
 
     return LaunchDescription([
-        config_file_arg, 
+        config_file_arg,
+        reactive_planner_config_arg, 
          Node(
             package='safe_bayesian_optimization',
              executable='safe_bayesian_optimization_node',
              name='safe_bayesian_optimization_node',
-             parameters=[LaunchConfiguration('config_file')],
+             parameters=[LaunchConfiguration('config_file'), LaunchConfiguration('reactive_planner_config')],
              output='screen'
              ),
          Node(
