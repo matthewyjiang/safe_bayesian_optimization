@@ -244,4 +244,18 @@ OutputStructScalar polygonInsideImplicit(std::vector<double> Position,
                                          PolygonClass PolygonUsed,
                                          DiffeoParamsClass DiffeoParams);
 
+struct DiffeoTransformResult {
+  std::vector<double> transformed_position;
+  std::vector<std::vector<double>> transformed_jacobian;
+  std::vector<double> transformed_hessian;
+  double alpha1, alpha2, beta1, beta2;
+  double transformed_orientation;
+};
+
+DiffeoTransformResult computeDiffeoTransform(
+    std::vector<double> robot_position,
+    double robot_orientation,
+    std::vector<std::vector<PolygonClass>> diffeo_tree_array,
+    DiffeoParamsClass diffeo_params);
+
 #endif // REACTIVE_PLANNER_LIB_H

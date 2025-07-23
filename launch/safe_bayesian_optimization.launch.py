@@ -74,6 +74,13 @@ def generate_launch_description():
              name='goal_point_publisher',
              output='screen'
              ),
+         Node(
+            package='safe_bayesian_optimization',
+            executable='reactive_navigation_node',
+            name='reactive_navigation_node',
+            parameters=[LaunchConfiguration('reactive_planner_config')],
+            output='screen'
+            ),
                 Node(
             package='foxglove_visualization',  # Replace with the package where Foxglove is defined
             executable='visualizer',  # Replace with the executable name of Foxglove
@@ -108,6 +115,19 @@ def generate_launch_description():
             output='screen',
             parameters=[mapping_params]
         ),
+        Node(
+            package='turtlesim',
+            executable='turtlesim_node',
+            name='turtlesim_node',
+            output='screen',
+            parameters=[{'background_r': 255, 'background_g': 255, 'background_b': 255}]
+            ),
+        # Node(
+        #     package='safe_bayesian_optimization',
+        #     executable='turtlesim_spatial_publisher.py',
+        #     name='turtlesim_spatial_publisher',
+        #     output='screen'
+        #     ),
 
         foxglove_bridge_launch,
 

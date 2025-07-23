@@ -18,6 +18,7 @@ find_package(trusses_custom_interfaces REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
@@ -28,6 +29,20 @@ find_package(Boost REQUIRED COMPONENTS system)
 find_package(CGAL REQUIRED COMPONENTS Core)
 find_package(PCL 1.12 REQUIRED COMPONENTS common io surface)
 find_package(Qhull REQUIRED)
+find_package(turtlesim REQUIRED)
+
+# enable fetch content
+
+include(FetchContent)
+
+FetchContent_Declare(
+  voro++
+  GIT_REPOSITORY https://github.com/chr1shr/voro.git
+  GIT_TAG v0.4.6
+)
+
+FetchContent_MakeAvailable(voro++)
+
 
 add_definitions(${PCL_DEFINITIONS})
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -59,6 +74,7 @@ add_definitions(
 add_library(reactive_planner
     src/libraries/polygeom_lib.cpp
     src/libraries/reactive_planner_lib.cpp
+    src/libraries/reactive_planner_lib_ext.cpp
 )
 
 # Add executables
@@ -68,7 +84,7 @@ add_executable(reactive_navigation_node src/reactive_navigation_node.cpp)
 
 # Add dependencies
 ament_target_dependencies(
-    safe_bayesian_optimization_node rclcpp trusses_custom_interfaces Eigen3 geometry_msgs sensor_msgs cv_bridge PCL Boost OpenCV CGAL
+    safe_bayesian_optimization_node rclcpp trusses_custom_interfaces Eigen3 geometry_msgs sensor_msgs cv_bridge PCL Boost OpenCV CGAL visualization_msgs
 )
 
 target_link_libraries(reactive_planner
@@ -93,6 +109,7 @@ target_link_libraries(
     reactive_navigation_node
     ${Boost_LIBRARIES}
     reactive_planner
+    voro++
 )
 
 target_include_directories(safe_bayesian_optimization_node PRIVATE ${PCL_INCLUDE_DIRS})
@@ -104,15 +121,21 @@ rosidl_target_interfaces(reactive_navigation_node
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
 ament_target_dependencies(
-    goal_point_publisher rclcpp geometry_msgs
+    goal_point_publisher rclcpp geometry_msgs visualization_msgs
 )
 
 ament_target_dependencies(
-    reactive_navigation_node rclcpp geometry_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs Boost
+    reactive_navigation_node rclcpp geometry_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs Boost turtlesim
 )
 
 ament_target_dependencies(
     reactive_planner rclcpp geometry_msgs CGAL Boost
+)
+
+# Install Python scripts
+install(PROGRAMS
+  src/turtlesim_spatial_publisher.py
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 # Install executables
@@ -140,6 +163,12 @@ install(DIRECTORY
 # Install config files
 install(DIRECTORY
   config
+  DESTINATION share/${PROJECT_NAME}/
+)
+
+# Install data files
+install(DIRECTORY
+  data
   DESTINATION share/${PROJECT_NAME}/
 )
 

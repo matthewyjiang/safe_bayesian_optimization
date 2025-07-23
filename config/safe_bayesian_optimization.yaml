@@ -3,7 +3,7 @@ safe_bayesian_optimization_node:
     opt: 
       beta: 2.0
       lipshitz: 1.0
-      f_min: 300.0
+      f_min: 500.0
       
     # Terrain map request parameters
     terrain_map:

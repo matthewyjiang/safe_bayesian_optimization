@@ -6,3 +6,7 @@ reactive_planner:
     mu_1: 1.0                 # Switch exponent mu1
     mu_2: 1.0                 # Switch exponent mu2
     robot_radius: 0.3         # Robot radius for collision avoidance (meters)
+    linear_gain: 1.0          # Linear velocity gain
+    angular_gain: 1.0         # Angular velocity gain
+    linear_cmd_limit: 0.5     # Maximum linear velocity command (m/s)
+    angular_cmd_limit: 1.0    # Maximum angular velocity command (rad/s)

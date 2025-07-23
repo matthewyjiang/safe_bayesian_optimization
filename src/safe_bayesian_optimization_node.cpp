@@ -19,6 +19,7 @@
 #include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/polygon.hpp>
+#include <visualization_msgs/msg/marker.hpp>
 #include <libqhullcpp/Qhull.h>
 #include <libqhullcpp/QhullFacetList.h>
 #include <libqhullcpp/QhullVertexSet.h>
@@ -75,6 +76,9 @@ public:
     // Create publishers
     current_subgoal_pub_ = this->create_publisher<geometry_msgs::msg::Point>(
         "current_subgoal", 10);
+    
+    subgoal_marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>(
+        "subgoal_marker", 10);
     polygons_pub_ =
         this->create_publisher<safe_bayesian_optimization::msg::PolygonArray>(
             "polygon_array", 10);
@@ -115,6 +119,7 @@ private:
   rclcpp::TimerBase::SharedPtr spatial_data_timer_;
   rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr goal_point_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr current_subgoal_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr subgoal_marker_pub_;
   rclcpp::Publisher<safe_bayesian_optimization::msg::PolygonArray>::SharedPtr
       polygons_pub_;
   rclcpp::Publisher<geometry_msgs::msg::Polygon>::SharedPtr envelope_pub_;
@@ -369,6 +374,10 @@ private:
       subgoal.z = 0.0; // Assuming 2D data, set z to 0
 
       current_subgoal_pub_->publish(subgoal);
+      
+      // Publish subgoal marker for visualization
+      publish_subgoal_marker(subgoal);
+      
       RCLCPP_INFO(this->get_logger(), "Published next subgoal: (%f, %f)",
                   subgoal.x, subgoal.y);
     } else {
@@ -665,6 +674,32 @@ private:
 
   void goal_point_callback(const geometry_msgs::msg::Point::SharedPtr msg) {
     current_goal_ = *msg;
+  }
+  
+  void publish_subgoal_marker(const geometry_msgs::msg::Point& subgoal) {
+    visualization_msgs::msg::Marker marker;
+    marker.header.frame_id = "map";
+    marker.header.stamp = this->get_clock()->now();
+    marker.ns = "subgoal";
+    marker.id = 0;
+    marker.type = visualization_msgs::msg::Marker::SPHERE;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+    
+    marker.pose.position.x = subgoal.x;
+    marker.pose.position.y = subgoal.y;
+    marker.pose.position.z = subgoal.z;
+    marker.pose.orientation.w = 1.0;
+    
+    marker.scale.x = 0.3;
+    marker.scale.y = 0.3;
+    marker.scale.z = 0.3;
+    
+    marker.color.r = 0.0;
+    marker.color.g = 1.0;
+    marker.color.b = 0.0;
+    marker.color.a = 1.0;
+    
+    subgoal_marker_pub_->publish(marker);
   }
 };
 
