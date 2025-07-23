@@ -53,6 +53,10 @@ Parameters can be configured in:
 - `reactive_planner.mu_1`, `reactive_planner.mu_2`: Scaling parameters
 - `reactive_planner.robot_radius`: Robot collision radius
 
+## How to implement local workspace and local freespace
+
+Use limited sensing range method to avoid voronoi diagrams. Local workspace is LSW - obstacles. Local freespace is LSW eroded by robot radius. This limited sensing range does not need to be a circle, it can be a simpler shape such a square or octagon.
+
 ## License
 
 Apache 2.0
