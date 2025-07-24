@@ -4,13 +4,14 @@ safe_bayesian_optimization_node:
       beta: 2.0
       lipshitz: 1.0
       f_min: 500.0
+      subgoal_erosion: 0.4
       
     # Terrain map request parameters
     terrain_map:
-      width: 300.0
-      height: 300.0
-      width_cells: 300
-      height_cells: 300
+      width: 200.0
+      height: 200.0
+      width_cells: 200
+      height_cells: 200
       
     # Debug configuration
     debug:

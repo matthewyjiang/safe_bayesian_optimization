@@ -1,11 +1,18 @@
 #include "polygeom_lib.h"
 #include "reactive_planner_lib.h"
 #include "safe_bayesian_optimization/msg/polygon_array.hpp"
+
+#include <MyGAL/FortuneAlgorithm.h>
 #include <boost/geometry.hpp>
 #include <boost/geometry/algorithms/buffer.hpp>
+#include <boost/geometry/algorithms/detail/sections/sectionalize.hpp>
+#include <boost/geometry/algorithms/line_interpolate.hpp>
 #include <boost/geometry/strategies/buffer.hpp>
+#include <cstdlib>
+#include <fstream>
 #include <geometry_msgs/msg/polygon.hpp>
 #include <geometry_msgs/msg/twist.hpp>
+#include <iomanip>
 #include <rclcpp/rclcpp.hpp>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Quaternion.h>
@@ -13,9 +20,8 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <turtlesim/msg/pose.hpp>
-#include <voro++/cell.hh>
-#include <voro++/container.hh>
-#include <voro++/voro++.hh>
+#include <visualization_msgs/msg/marker.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 
 namespace bg = boost::geometry;
 
@@ -35,6 +41,7 @@ public:
     this->declare_parameter("reactive_planner.angular_gain", 1.0);
     this->declare_parameter("reactive_planner.linear_cmd_limit", 0.5);
     this->declare_parameter("reactive_planner.angular_cmd_limit", 1.0);
+    this->declare_parameter("reactive_planner.goal_tolerance", 0.1);
 
     // Read parameters and configure diffeomorphism parameters
     double p = this->get_parameter("reactive_planner.p").as_double();
@@ -54,6 +61,8 @@ public:
         this->get_parameter("reactive_planner.linear_cmd_limit").as_double();
     angular_cmd_limit_ =
         this->get_parameter("reactive_planner.angular_cmd_limit").as_double();
+    goal_tolerance_ =
+        this->get_parameter("reactive_planner.goal_tolerance").as_double();
 
     // Set default workspace (will be updated when envelope is received)
     std::vector<std::vector<double>> default_workspace = {
@@ -67,9 +76,9 @@ public:
                 "Configured reactive planner with p=%.2f, epsilon=%.3f, "
                 "varepsilon=%.3f, mu_1=%.2f, mu_2=%.2f, robot_radius=%.3f, "
                 "linear_gain=%.2f, angular_gain=%.2f, linear_limit=%.2f, "
-                "angular_limit=%.2f",
+                "angular_limit=%.2f, goal_tolerance=%.3f",
                 p, epsilon, varepsilon, mu_1, mu_2, robot_radius_, linear_gain_,
-                angular_gain_, linear_cmd_limit_, angular_cmd_limit_);
+                angular_gain_, linear_cmd_limit_, angular_cmd_limit_, goal_tolerance_);
 
     // Subscribe to obstacle polygons
     obstacles_sub_ = this->create_subscription<
@@ -100,6 +109,16 @@ public:
     cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>(
         "/turtle1/cmd_vel", 10);
 
+    // Create freespace markers publisher
+    freespace_markers_pub_ =
+        this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/freespace_markers", 10);
+
+    // Create envelope markers publisher
+    envelope_markers_pub_ =
+        this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/envelope_markers", 10);
+
     // Create timer for control loop
     control_timer_ = this->create_wall_timer(
         std::chrono::milliseconds(500),
@@ -115,6 +134,10 @@ private:
   rclcpp::Subscription<turtlesim::msg::Pose>::SharedPtr pose_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr subgoal_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+      freespace_markers_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+      envelope_markers_pub_;
   rclcpp::TimerBase::SharedPtr control_timer_;
 
   tf2_ros::Buffer tf_buffer_;
@@ -126,6 +149,7 @@ private:
   double angular_gain_;
   double linear_cmd_limit_;
   double angular_cmd_limit_;
+  double goal_tolerance_;
   std::vector<polygon> obstacle_polygons_;
   std::vector<std::vector<PolygonClass>> diffeo_tree_array_;
 
@@ -195,7 +219,7 @@ private:
     std::vector<polygon> polygon_list_merged;
     for (size_t i = 0; i < output_union.size(); i++) {
       polygon simplified_component;
-      bg::simplify(output_union[i], simplified_component, 0.2);
+      bg::simplify(output_union[i], simplified_component, 2.0);
       polygon_list_merged.push_back(simplified_component);
     }
 
@@ -250,12 +274,36 @@ private:
 
     auto merged_polygons = get_merged_dilated_polygons();
 
+    // Print merged polygons for gnuplot visualization
+    RCLCPP_INFO(this->get_logger(),
+                "Printing %zu merged polygons before diffeo tree conversion:",
+                merged_polygons.size());
+    for (size_t i = 0; i < merged_polygons.size(); ++i) {
+      const auto &poly = merged_polygons[i];
+      RCLCPP_INFO(this->get_logger(),
+                  "Merged polygon %zu: %zu vertices, area=%.6f", i,
+                  poly.outer().size(), bg::area(poly));
+    }
+
+    // Visualize merged polygons in gnuplot format
+
+    diffeo_tree_array_.clear();
     for (const auto &merged_poly : merged_polygons) {
+      if (merged_poly.outer().size() < 3) {
+        RCLCPP_WARN(this->get_logger(),
+                    "Skipping merged polygon with area < 0.01");
+        continue;
+      }
       std::vector<PolygonClass> tree;
+      RCLCPP_INFO(this->get_logger(),
+                  "Converting merged polygon to diffeomorphism tree");
       diffeoTreeConvex(BoostPointToStd(BoostPolyToBoostPoint(merged_poly)),
                        diffeo_params_, &tree);
       diffeo_tree_array_.push_back(tree);
     }
+    RCLCPP_INFO(this->get_logger(),
+                "Done converting merged polygon to diffeomorphism tree");
+
     RCLCPP_INFO(this->get_logger(),
                 "Converted %zu merged polygons to diffeomorphism trees",
                 diffeo_tree_array_.size());
@@ -278,6 +326,9 @@ private:
     env_x_max_ = workspace[2][0];
     env_y_min_ = workspace[0][1];
     env_y_max_ = workspace[2][1];
+    
+    // Publish envelope markers for visualization
+    publish_envelope_markers(msg);
   }
 
   void subgoal_callback(const geometry_msgs::msg::Point::SharedPtr msg) {
@@ -339,6 +390,16 @@ private:
       model_obstacle_centers.push_back(root_center);
       model_obstacle_radii.push_back(root_radius);
     }
+
+    // log the centers and radii of model obstacles
+    RCLCPP_INFO(this->get_logger(), "Model obstacle centers and radii:");
+    for (size_t i = 0; i < model_obstacle_centers.size(); ++i) {
+      RCLCPP_INFO(this->get_logger(),
+                  "Obstacle %zu: center=(%.2f, %.2f), radius=%.2f", i,
+                  model_obstacle_centers[i].get<0>(),
+                  model_obstacle_centers[i].get<1>(), model_obstacle_radii[i]);
+    }
+
     RCLCPP_INFO(this->get_logger(), "computing local workspace polygon");
 
     polygon local_workspace_polygon = compute_local_workspace_polygon(
@@ -353,13 +414,13 @@ private:
       return;
     }
     bg::strategy::buffer::distance_symmetric<double> distance_strategy(
-        robot_radius_);
+        -robot_radius_);
     bg::strategy::buffer::join_round join_strategy;
     bg::strategy::buffer::end_round end_strategy;
     bg::strategy::buffer::point_circle point_strategy;
     bg::strategy::buffer::side_straight side_strategy;
 
-    // Dilate the local workspace polygon to create free space
+    // erode the local workspace polygon to create free space
     multi_polygon local_free_space_multi;
     bg::buffer(local_workspace_polygon, local_free_space_multi,
                distance_strategy, side_strategy, join_strategy, end_strategy,
@@ -389,6 +450,9 @@ private:
 
     point local_goal_angular =
         compute_local_goal(local_free_space_polygon, subgoal_point);
+
+    // Publish freespace markers for visualization
+    publish_freespace_markers(local_free_space_polygon);
 
     // Compute the basis for the virtual control inputs
     double tV = (local_goal_linear.get<0>() -
@@ -443,11 +507,25 @@ private:
     double dW_virtual = angular_ctl_gain * std::atan2(tW2, tW1);
     double angular_cmd = (dW_virtual - linear_cmd * DksiCosSin) / dksi_dpsi;
 
-    // Publish control commands
-    cmd_vel.linear.x =
-        std::max(-linear_cmd_limit_, std::min(linear_cmd, linear_cmd_limit_));
-    cmd_vel.angular.z = std::max(-angular_cmd_limit_,
-                                 std::min(angular_cmd, angular_cmd_limit_));
+    // Check if robot is within goal tolerance of subgoal
+    double distance_to_subgoal = sqrt(pow(current_subgoal_.x - current_position_.x, 2) +
+                                     pow(current_subgoal_.y - current_position_.y, 2));
+    
+    if (distance_to_subgoal <= goal_tolerance_) {
+      // Robot is within goal tolerance, stop movement
+      cmd_vel.linear.x = 0.0;
+      cmd_vel.angular.z = 0.0;
+      RCLCPP_INFO(this->get_logger(),
+                  "Robot within goal tolerance (%.3f <= %.3f), stopping",
+                  distance_to_subgoal, goal_tolerance_);
+    } else {
+      // Normal control commands
+      cmd_vel.linear.x =
+          std::max(-linear_cmd_limit_, std::min(linear_cmd, linear_cmd_limit_));
+      cmd_vel.angular.z = std::max(-angular_cmd_limit_,
+                                   std::min(angular_cmd, angular_cmd_limit_));
+    }
+    
     cmd_vel_pub_->publish(cmd_vel);
 
     RCLCPP_INFO(this->get_logger(),
@@ -460,37 +538,51 @@ private:
       std::vector<point> &model_obstacle_centers,
       std::vector<double> &model_obstacle_radii) {
 
-    int num_blocks_x = env_x_max_ - env_x_min_;
-    int num_blocks_y = env_y_max_ - env_y_min_;
+    point robot_position(robot_position_transformed[0],
+                         robot_position_transformed[1]);
 
-    voro::container_poly con(env_x_min_, env_x_max_, env_y_min_, env_y_max_,
-                             0.5, 0.5, num_blocks_x, num_blocks_y, 1, false,
-                             false, false, 4);
-    con.put(0, robot_position_transformed.at(0),
-            robot_position_transformed.at(1), 0.0, robot_radius_);
+    std::vector<mygal::Vector2<double>> obstacle_points;
+
+    obstacle_points.emplace_back(robot_position.get<0>(),
+                                 robot_position.get<1>());
+
+    // get the points on the obstacle radius that are closest to the robot
     for (size_t i = 0; i < model_obstacle_centers.size(); ++i) {
-      const point &center = model_obstacle_centers[i];
-      double radius = model_obstacle_radii[i];
-      con.put(i + 1, center.get<0>(), center.get<1>(), 0.0, radius);
-    }
 
-    voro::voronoicell_neighbor c;
+      point obstacle_center = model_obstacle_centers[i];
+      double obstacle_radius = model_obstacle_radii[i];
+      line l;
+      l.push_back(obstacle_center);
+      l.push_back(robot_position);
+
+      point result;
+      bg::line_interpolate(l, obstacle_radius, result);
+
+      obstacle_points.emplace_back(result.get<0>(), result.get<1>());
+    }
+    auto algorithm = mygal::FortuneAlgorithm<double>(obstacle_points);
+    algorithm.construct();
+    algorithm.bound(mygal::Box<double>{static_cast<double>(env_x_min_ - 1),
+                                       static_cast<double>(env_y_min_ - 1),
+                                       static_cast<double>(env_x_max_ + 1),
+                                       static_cast<double>(env_y_max_ + 1)});
+    auto diagram = algorithm.getDiagram();
+    diagram.intersect(mygal::Box<double>{
+        static_cast<double>(env_x_min_), static_cast<double>(env_y_min_),
+        static_cast<double>(env_x_max_), static_cast<double>(env_y_max_)});
+    auto site = diagram.getSites().begin();
+    auto face = site->face;
+    auto he = face->outerComponent;
+
     polygon local_workspace_polygon;
-
-    if (con.compute_ghost_cell(c, robot_position_transformed.at(0),
-                               robot_position_transformed.at(1), 0,
-                               robot_radius_)) {
-      // Extract the vertices of the ghost cell
-      std::vector<double> vertices;
-      c.vertices(vertices);
-      // find all vertices that have z = 0.5 (they are either -0.5 or 0.5)
-      for (size_t i = 0; i < vertices.size(); i += 3) {
-        if (vertices[i + 2] > 0) {
-          point p(vertices[i], vertices[i + 1]);
-          local_workspace_polygon.outer().push_back(p);
-        }
-      }
+    while (he->next != face->outerComponent) {
+      he = he->next;
+      auto vertex = he->origin->point;
+      bg::append(
+          local_workspace_polygon.outer(),
+          bg::model::point<double, 2, bg::cs::cartesian>(vertex.x, vertex.y));
     }
+
     return local_workspace_polygon;
   }
 
@@ -537,12 +629,92 @@ private:
       }
     }
   }
+
+  void publish_freespace_markers(const polygon &local_free_space_polygon) {
+    auto marker_array = visualization_msgs::msg::MarkerArray();
+    RCLCPP_INFO(this->get_logger(),
+                "Publishing freespace markers for polygon with %zu points",
+                local_free_space_polygon.outer().size());
+
+    // Create a marker for the freespace polygon
+    auto marker = visualization_msgs::msg::Marker();
+    marker.header.frame_id = "map";
+    marker.header.stamp = this->now();
+    marker.ns = "freespace";
+    marker.id = 0;
+    marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+
+    // Set marker properties
+    marker.scale.x = 0.05; // Line width
+    marker.color.r = 0.0;
+    marker.color.g = 1.0;
+    marker.color.b = 0.0;
+    marker.color.a = 0.8;
+
+    // Convert polygon points to marker points
+    for (const auto &boost_point : local_free_space_polygon.outer()) {
+      geometry_msgs::msg::Point point;
+      point.x = bg::get<0>(boost_point);
+      point.y = bg::get<1>(boost_point);
+      point.z = 0.0;
+      marker.points.push_back(point);
+    }
+
+    // Close the polygon by adding the first point at the end
+    if (!marker.points.empty()) {
+      marker.points.push_back(marker.points[0]);
+    }
+
+    marker_array.markers.push_back(marker);
+    freespace_markers_pub_->publish(marker_array);
+  }
+
+  void publish_envelope_markers(const geometry_msgs::msg::Polygon::SharedPtr envelope_msg) {
+    auto marker_array = visualization_msgs::msg::MarkerArray();
+    
+    // Create a marker for the envelope polygon
+    auto marker = visualization_msgs::msg::Marker();
+    marker.header.frame_id = "map";
+    marker.header.stamp = this->now();
+    marker.ns = "envelope";
+    marker.id = 0;
+    marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+    
+    // Set marker properties
+    marker.scale.x = 0.08; // Line width (slightly thicker than freespace)
+    marker.color.r = 1.0;
+    marker.color.g = 0.0;
+    marker.color.b = 0.0;
+    marker.color.a = 0.8;
+    
+    // Convert envelope points to marker points
+    for (const auto &ros_point : envelope_msg->points) {
+      geometry_msgs::msg::Point point;
+      point.x = ros_point.x;
+      point.y = ros_point.y;
+      point.z = 0.0;
+      marker.points.push_back(point);
+    }
+    
+    // Close the polygon by adding the first point at the end
+    if (!marker.points.empty()) {
+      marker.points.push_back(marker.points[0]);
+    }
+    
+    marker_array.markers.push_back(marker);
+    envelope_markers_pub_->publish(marker_array);
+  }
 };
 
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
   auto node = std::make_shared<ReactiveNavigationNode>();
-  rclcpp::spin(node);
+  auto executor = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
+  executor->add_node(node);
+  executor->spin();
+
   rclcpp::shutdown();
   return 0;
 }

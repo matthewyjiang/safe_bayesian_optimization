@@ -27,24 +27,23 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Boost REQUIRED COMPONENTS system)
 find_package(CGAL REQUIRED COMPONENTS Core)
-find_package(PCL 1.12 REQUIRED COMPONENTS common io surface)
 find_package(Qhull REQUIRED)
 find_package(turtlesim REQUIRED)
+find_package(Qt5 REQUIRED COMPONENTS Core Widgets)
 
 # enable fetch content
 
 include(FetchContent)
 
 FetchContent_Declare(
-  voro++
-  GIT_REPOSITORY https://github.com/chr1shr/voro.git
-  GIT_TAG v0.4.6
+  mygal
+  GIT_REPOSITORY https://github.com/Serinox/MyGAL.git
+  GIT_TAG Patch_For_Building_Through_FetchContent
 )
 
-FetchContent_MakeAvailable(voro++)
+FetchContent_MakeAvailable(mygal)
 
 
-add_definitions(${PCL_DEFINITIONS})
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Generate custom messages
@@ -59,15 +58,6 @@ ament_export_include_directories(
 
 include_directories(
   include
-  ${PCL_INCLUDE_DIRS}
-)
-
-link_directories(
-  ${PCL_LIBRARY_DIRS}
-)
-
-add_definitions(
-  ${PCL_DEFINITIONS}
 )
 
 
@@ -84,7 +74,7 @@ add_executable(reactive_navigation_node src/reactive_navigation_node.cpp)
 
 # Add dependencies
 ament_target_dependencies(
-    safe_bayesian_optimization_node rclcpp trusses_custom_interfaces Eigen3 geometry_msgs sensor_msgs cv_bridge PCL Boost OpenCV CGAL visualization_msgs
+    safe_bayesian_optimization_node rclcpp trusses_custom_interfaces Eigen3 geometry_msgs sensor_msgs cv_bridge Boost OpenCV CGAL visualization_msgs
 )
 
 target_link_libraries(reactive_planner
@@ -95,7 +85,6 @@ target_link_libraries(reactive_planner
 
 target_link_libraries(
     safe_bayesian_optimization_node
-    ${PCL_LIBRARIES}
     ${Boost_LIBRARIES}
     ${OpenCV_LIBS}
     Qhull::qhullcpp
@@ -109,10 +98,13 @@ target_link_libraries(
     reactive_navigation_node
     ${Boost_LIBRARIES}
     reactive_planner
-    voro++
+    mygal
+    Qt5::Core
+    Qt5::Widgets
+    CGAL::CGAL
+    CGAL::CGAL_Core
 )
 
-target_include_directories(safe_bayesian_optimization_node PRIVATE ${PCL_INCLUDE_DIRS})
 
 rosidl_target_interfaces(safe_bayesian_optimization_node
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
@@ -125,7 +117,7 @@ ament_target_dependencies(
 )
 
 ament_target_dependencies(
-    reactive_navigation_node rclcpp geometry_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs Boost turtlesim
+    reactive_navigation_node rclcpp geometry_msgs nav_msgs sensor_msgs tf2 tf2_ros tf2_geometry_msgs Boost turtlesim visualization_msgs
 )
 
 ament_target_dependencies(

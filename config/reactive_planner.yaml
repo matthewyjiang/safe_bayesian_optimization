@@ -1,12 +1,13 @@
 reactive_planner:
   ros__parameters:
     p: 2.0                    # R-function exponent
-    epsilon: 0.1              # Distance for the switches
-    varepsilon: 0.05          # Distance allowed to dilate the polygon
+    epsilon: 0.4              # Distance for the switches
+    varepsilon: 0.4          # Distance allowed to dilate the polygon
     mu_1: 1.0                 # Switch exponent mu1
-    mu_2: 1.0                 # Switch exponent mu2
-    robot_radius: 0.3         # Robot radius for collision avoidance (meters)
+    mu_2: 0.15                 # Switch exponent mu2
+    robot_radius: 1         # Robot radius for collision avoidance (meters)
     linear_gain: 1.0          # Linear velocity gain
     angular_gain: 1.0         # Angular velocity gain
     linear_cmd_limit: 0.5     # Maximum linear velocity command (m/s)
     angular_cmd_limit: 1.0    # Maximum angular velocity command (rad/s)
+    goal_tolerance: 0.1       # Distance tolerance to stop near subgoal (meters)
