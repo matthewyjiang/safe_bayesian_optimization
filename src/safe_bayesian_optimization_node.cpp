@@ -22,9 +22,6 @@
 #include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/msg/point.hpp>
 #include <geometry_msgs/msg/polygon.hpp>
-#include <libqhullcpp/Qhull.h>
-#include <libqhullcpp/QhullFacetList.h>
-#include <libqhullcpp/QhullVertexSet.h>
 #include <limits>
 #include <memory>
 #include <opencv2/opencv.hpp>
@@ -269,7 +266,8 @@ private:
       frontier_confidence_width(i) = Q_(idx, 1) - Q_(idx, 0);
     }
 
-    const Eigen::VectorXd goal_eigen = (Eigen::VectorXd(2) << current_goal_.x, current_goal_.y).finished();
+    const Eigen::VectorXd goal_eigen =
+        (Eigen::VectorXd(2) << current_goal_.x, current_goal_.y).finished();
     const Eigen::VectorXd distances =
         (frontier_points.rowwise() - goal_eigen.transpose()).rowwise().norm();
 
@@ -387,18 +385,22 @@ private:
 
     publish_obstacle_polygons();
 
-    // Check if the goal itself is safe by checking if it's within the eroded polygon
-    bg::model::d2::point_xy<double> goal_point(current_goal_.x, current_goal_.y);
-    
+    // Check if the goal itself is safe by checking if it's within the eroded
+    // polygon
+    bg::model::d2::point_xy<double> goal_point(current_goal_.x,
+                                               current_goal_.y);
+
     geometry_msgs::msg::Point subgoal;
     if (bg::within(goal_point, eroded_concave_polygon_)) {
       // Goal is safe, use it directly as the subgoal
       subgoal.x = current_goal_.x;
       subgoal.y = current_goal_.y;
       subgoal.z = 0.0;
-      
-      RCLCPP_INFO(this->get_logger(), "Goal is within eroded safe region, using goal as subgoal: (%f, %f)",
-                  subgoal.x, subgoal.y);
+
+      RCLCPP_INFO(
+          this->get_logger(),
+          "Goal is within eroded safe region, using goal as subgoal: (%f, %f)",
+          subgoal.x, subgoal.y);
     } else {
       // Goal is not safe, find frontier subgoal and project it
       const int next_subgoal_index = GetNextSubgoal();
@@ -427,10 +429,11 @@ private:
         ProjectionResultStruct projection_result =
             polydist(eroded_poly_for_projection, raw_subgoal_point);
 
-        RCLCPP_INFO(
-            this->get_logger(), "Projected subgoal point: (%f, %f), distance: %f",
-            projection_result.projected_point.get<0>(),
-            projection_result.projected_point.get<1>(), projection_result.dist);
+        RCLCPP_INFO(this->get_logger(),
+                    "Projected subgoal point: (%f, %f), distance: %f",
+                    projection_result.projected_point.get<0>(),
+                    projection_result.projected_point.get<1>(),
+                    projection_result.dist);
 
         // Create final subgoal message from projected point
         subgoal.x = projection_result.projected_point.get<0>();

@@ -36,13 +36,10 @@ colcon build --cmake-args -DBUILD_EXAMPLES=OFF
 - CMake >= 3.8
 
 ### Core Libraries
-- **Eigen3**: Linear algebra operations
-- **OpenCV**: Computer vision and image processing
-- **Boost**: System utilities and geometry operations
-- **CGAL**: Computational geometry algorithms
-- **PCL 1.12**: Point cloud processing (common, io, surface components)
-- **Qt5**: Core and Widgets components
-- **Qhull**: Convex hull computation
+- **Eigen3**: Linear algebra operations for bayesian optimization
+- **OpenCV**: For finding contours on safe set 
+- **Boost**: Geometry operations
+- **CGAL**: Computational geometry algorithms - alphashape
 
 ### ROS 2 Packages
 - **Standard ROS 2 Packages**:
