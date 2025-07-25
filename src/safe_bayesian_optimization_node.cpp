@@ -219,9 +219,11 @@ private:
     // lookup
     std::unordered_map<int, std::unordered_map<int, int>> coord_to_index;
     for (int i = 0; i < D_.rows(); ++i) {
-      int x = static_cast<int>(D_(i, 0));
-      int y = static_cast<int>(D_(i, 1));
-      coord_to_index[x][y] = i;
+      int x = static_cast<int>((D_(i, 0) - min_x) / (max_x - min_x) * width);
+      int y = static_cast<int>((D_(i, 1) - min_y) / (max_y - min_y) * height);
+      if (x >= 0 && x < width && y >= 0 && y < height) {
+        coord_to_index[x][y] = i;
+      }
     }
 
     std::vector<int> contour_indices;
@@ -230,13 +232,10 @@ private:
 
     for (const auto &contour : contours) {
       for (const auto &point : contour) {
-        int orig_x = point.x + min_x;
-        int orig_y = point.y + min_y;
-
-        // O(1) lookup instead of O(n) search
-        auto x_it = coord_to_index.find(orig_x);
+        // O(1) lookup using scaled coordinates
+        auto x_it = coord_to_index.find(point.x);
         if (x_it != coord_to_index.end()) {
-          auto y_it = x_it->second.find(orig_y);
+          auto y_it = x_it->second.find(point.y);
           if (y_it != x_it->second.end()) {
             contour_indices.push_back(y_it->second);
           }
