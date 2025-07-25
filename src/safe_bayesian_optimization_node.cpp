@@ -189,15 +189,18 @@ private:
     int min_y = static_cast<int>(D_.col(1).minCoeff());
     int max_y = static_cast<int>(D_.col(1).maxCoeff());
 
-    int width = max_x - min_x + 1;
-    int height = max_y - min_y + 1;
+    int width = terrain_width_cells_;
+    int height = terrain_height_cells_;
 
     // Create binary image from safety data
     cv::Mat safety_image = cv::Mat::zeros(height, width, CV_8UC1);
 
     for (int i = 0; i < D_.rows(); ++i) {
-      int x = static_cast<int>(D_(i, 0)) - min_x;
-      int y = static_cast<int>(D_(i, 1)) - min_y;
+      // Get indices in the grid from D_, where the coordinates are not
+      // necessarily integers. so we need to scale them
+
+      int x = static_cast<int>((D_(i, 0) - min_x) / (max_x - min_x) * width);
+      int y = static_cast<int>((D_(i, 1) - min_y) / (max_y - min_y) * height);
 
       if (x >= 0 && x < width && y >= 0 && y < height) {
         safety_image.at<uchar>(y, x) = S_(i) ? 255 : 0;
