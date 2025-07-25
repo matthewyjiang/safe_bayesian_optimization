@@ -11,7 +11,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <geometry_msgs/msg/polygon.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/pose.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <iomanip>
 #include <rclcpp/rclcpp.hpp>
@@ -94,8 +94,8 @@ public:
         std::bind(&ReactiveNavigationNode::envelope_callback, this,
                   std::placeholders::_1));
 
-    // Subscribe to pose stamped
-    pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+    // Subscribe to pose
+    pose_sub_ = this->create_subscription<geometry_msgs::msg::Pose>(
         "spirit/mocap", 10,
         std::bind(&ReactiveNavigationNode::pose_callback, this,
                   std::placeholders::_1));
@@ -132,7 +132,7 @@ private:
   rclcpp::Subscription<safe_bayesian_optimization::msg::PolygonArray>::SharedPtr
       obstacles_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr envelope_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr pose_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr subgoal_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
@@ -340,13 +340,13 @@ private:
                 current_subgoal_.x, current_subgoal_.y, current_subgoal_.z);
   }
 
-  void pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
-    // Update current position from pose stamped
-    current_position_ = msg->pose.position;
+  void pose_callback(const geometry_msgs::msg::Pose::SharedPtr msg) {
+    // Update current position from pose
+    current_position_ = msg->position;
 
     // Extract yaw from quaternion
-    tf2::Quaternion q(msg->pose.orientation.x, msg->pose.orientation.y,
-                      msg->pose.orientation.z, msg->pose.orientation.w);
+    tf2::Quaternion q(msg->orientation.x, msg->orientation.y,
+                      msg->orientation.z, msg->orientation.w);
     tf2::Matrix3x3 m(q);
     double roll, pitch;
     m.getRPY(roll, pitch, current_yaw_);
