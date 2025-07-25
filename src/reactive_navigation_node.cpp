@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <geometry_msgs/msg/polygon.hpp>
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <iomanip>
 #include <rclcpp/rclcpp.hpp>
@@ -19,7 +20,6 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
-#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
@@ -96,7 +96,7 @@ public:
 
     // Subscribe to pose stamped
     pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
-        "/turtle1/pose", 10,
+        "spirit/pose", 10,
         std::bind(&ReactiveNavigationNode::pose_callback, this,
                   std::placeholders::_1));
 
@@ -345,11 +345,8 @@ private:
     current_position_ = msg->pose.position;
 
     // Extract yaw from quaternion
-    tf2::Quaternion q(
-        msg->pose.orientation.x,
-        msg->pose.orientation.y,
-        msg->pose.orientation.z,
-        msg->pose.orientation.w);
+    tf2::Quaternion q(msg->pose.orientation.x, msg->pose.orientation.y,
+                      msg->pose.orientation.z, msg->pose.orientation.w);
     tf2::Matrix3x3 m(q);
     double roll, pitch;
     m.getRPY(roll, pitch, current_yaw_);
