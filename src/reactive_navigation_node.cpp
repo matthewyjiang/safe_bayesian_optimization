@@ -78,7 +78,8 @@ public:
                 "linear_gain=%.2f, angular_gain=%.2f, linear_limit=%.2f, "
                 "angular_limit=%.2f, goal_tolerance=%.3f",
                 p, epsilon, varepsilon, mu_1, mu_2, robot_radius_, linear_gain_,
-                angular_gain_, linear_cmd_limit_, angular_cmd_limit_, goal_tolerance_);
+                angular_gain_, linear_cmd_limit_, angular_cmd_limit_,
+                goal_tolerance_);
 
     // Subscribe to obstacle polygons
     obstacles_sub_ = this->create_subscription<
@@ -107,7 +108,7 @@ public:
 
     // Create control command publisher
     cmd_vel_pub_ = this->create_publisher<geometry_msgs::msg::Twist>(
-        "/turtle1/cmd_vel", 10);
+        "spirit/ghost_trot_control", 10);
 
     // Create freespace markers publisher
     freespace_markers_pub_ =
@@ -326,7 +327,7 @@ private:
     env_x_max_ = workspace[2][0];
     env_y_min_ = workspace[0][1];
     env_y_max_ = workspace[2][1];
-    
+
     // Publish envelope markers for visualization
     publish_envelope_markers(msg);
   }
@@ -508,9 +509,10 @@ private:
     double angular_cmd = (dW_virtual - linear_cmd * DksiCosSin) / dksi_dpsi;
 
     // Check if robot is within goal tolerance of subgoal
-    double distance_to_subgoal = sqrt(pow(current_subgoal_.x - current_position_.x, 2) +
-                                     pow(current_subgoal_.y - current_position_.y, 2));
-    
+    double distance_to_subgoal =
+        sqrt(pow(current_subgoal_.x - current_position_.x, 2) +
+             pow(current_subgoal_.y - current_position_.y, 2));
+
     if (distance_to_subgoal <= goal_tolerance_) {
       // Robot is within goal tolerance, stop movement
       cmd_vel.linear.x = 0.0;
@@ -525,7 +527,7 @@ private:
       cmd_vel.angular.z = std::max(-angular_cmd_limit_,
                                    std::min(angular_cmd, angular_cmd_limit_));
     }
-    
+
     cmd_vel_pub_->publish(cmd_vel);
 
     RCLCPP_INFO(this->get_logger(),
@@ -670,9 +672,10 @@ private:
     freespace_markers_pub_->publish(marker_array);
   }
 
-  void publish_envelope_markers(const geometry_msgs::msg::Polygon::SharedPtr envelope_msg) {
+  void publish_envelope_markers(
+      const geometry_msgs::msg::Polygon::SharedPtr envelope_msg) {
     auto marker_array = visualization_msgs::msg::MarkerArray();
-    
+
     // Create a marker for the envelope polygon
     auto marker = visualization_msgs::msg::Marker();
     marker.header.frame_id = "map";
@@ -681,14 +684,14 @@ private:
     marker.id = 0;
     marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
     marker.action = visualization_msgs::msg::Marker::ADD;
-    
+
     // Set marker properties
     marker.scale.x = 0.08; // Line width (slightly thicker than freespace)
     marker.color.r = 1.0;
     marker.color.g = 0.0;
     marker.color.b = 0.0;
     marker.color.a = 0.8;
-    
+
     // Convert envelope points to marker points
     for (const auto &ros_point : envelope_msg->points) {
       geometry_msgs::msg::Point point;
@@ -697,12 +700,12 @@ private:
       point.z = 0.0;
       marker.points.push_back(point);
     }
-    
+
     // Close the polygon by adding the first point at the end
     if (!marker.points.empty()) {
       marker.points.push_back(marker.points[0]);
     }
-    
+
     marker_array.markers.push_back(marker);
     envelope_markers_pub_->publish(marker_array);
   }

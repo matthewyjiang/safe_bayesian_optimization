@@ -8,6 +8,6 @@ reactive_planner:
     robot_radius: 1         # Robot radius for collision avoidance (meters)
     linear_gain: 1.0          # Linear velocity gain
     angular_gain: 1.0         # Angular velocity gain
-    linear_cmd_limit: 0.5     # Maximum linear velocity command (m/s)
+    linear_cmd_limit: 0.3     # Maximum linear velocity command (m/s)
     angular_cmd_limit: 1.0    # Maximum angular velocity command (rad/s)
     goal_tolerance: 0.1       # Distance tolerance to stop near subgoal (meters)
