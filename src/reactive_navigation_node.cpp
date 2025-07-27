@@ -96,7 +96,7 @@ public:
 
     // Subscribe to pose
     pose_sub_ = this->create_subscription<geometry_msgs::msg::Pose>(
-        "spirit/mocap", 10,
+        "spirit/current_pose", 10,
         std::bind(&ReactiveNavigationNode::pose_callback, this,
                   std::placeholders::_1));
 
