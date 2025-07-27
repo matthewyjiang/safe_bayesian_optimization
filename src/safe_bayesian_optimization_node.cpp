@@ -9,6 +9,7 @@
 #include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
 #include <CGAL/Triangulation_data_structure_2.h>
 #include <Eigen/Dense>
+#include <algorithm>
 #include <array>
 #include <boost/geometry.hpp>
 #include <boost/geometry/algorithms/buffer.hpp>
@@ -43,22 +44,20 @@ public:
     // Declare parameters
     this->declare_parameter("opt.beta", 2.0);
     this->declare_parameter("opt.f_min", 0.0);
-    this->declare_parameter("terrain_map.width", 2.0);
-    this->declare_parameter("terrain_map.height", 2.0);
-    this->declare_parameter("terrain_map.width_cells", 20);
-    this->declare_parameter("terrain_map.height_cells", 20);
+    this->declare_parameter("terrain_map.resolution", std::vector<double>{0.1, 0.1});
     this->declare_parameter("debug.publish_debug_image", false);
     this->declare_parameter("opt.subgoal_erosion", 0.2);
 
     // Read parameters
     beta_ = this->get_parameter("opt.beta").as_double();
     f_min_ = this->get_parameter("opt.f_min").as_double();
-    terrain_width_ = this->get_parameter("terrain_map.width").as_double();
-    terrain_height_ = this->get_parameter("terrain_map.height").as_double();
-    terrain_width_cells_ =
-        this->get_parameter("terrain_map.width_cells").as_int();
-    terrain_height_cells_ =
-        this->get_parameter("terrain_map.height_cells").as_int();
+    auto resolution_vector = this->get_parameter("terrain_map.resolution").as_double_array();
+    if (resolution_vector.size() != 2) {
+      RCLCPP_ERROR(this->get_logger(), "terrain_map.resolution must be an array of 2 values [x_resolution, y_resolution]");
+      throw std::runtime_error("Invalid terrain_map.resolution parameter");
+    }
+    terrain_x_resolution_ = resolution_vector[0];
+    terrain_y_resolution_ = resolution_vector[1];
     publish_debug_image_ =
         this->get_parameter("debug.publish_debug_image").as_bool();
     subgoal_erosion_ = this->get_parameter("opt.subgoal_erosion").as_double();
@@ -140,11 +139,13 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
 
   // Parameters from config
-  double terrain_width_;
-  double terrain_height_;
+  double terrain_x_resolution_;
+  double terrain_y_resolution_;
+  bool publish_debug_image_;
+  
+  // Terrain dimensions from service response
   int terrain_width_cells_;
   int terrain_height_cells_;
-  bool publish_debug_image_;
 
   // Current goal point
   geometry_msgs::msg::Point current_goal_;
@@ -189,8 +190,11 @@ private:
     int min_y = static_cast<int>(D_.col(1).minCoeff());
     int max_y = static_cast<int>(D_.col(1).maxCoeff());
 
+    // Use stored grid dimensions from service response
     int width = terrain_width_cells_;
     int height = terrain_height_cells_;
+    
+    RCLCPP_INFO(this->get_logger(), "Using grid dimensions: %dx%d", width, height);
 
     // Create binary image from safety data
     cv::Mat safety_image = cv::Mat::zeros(height, width, CV_8UC1);
@@ -294,7 +298,7 @@ private:
         trusses_custom_interfaces::srv::SpatialData::Request>();
 
     // Use callback-based async call
-    spatial_data_client_->async_send_request(
+            spatial_data_client_->async_send_request(
         request,
         [this](rclcpp::Client<trusses_custom_interfaces::srv::SpatialData>::
                    SharedFuture future) {
@@ -307,7 +311,7 @@ private:
             // Process the spatial data here
             // response->x_coords, response->y_coords, response->values
 
-            // Request terrain map after receiving spatial data
+            // Request terrain map with resolution (service will calculate dimensions from data bounds)
             request_terrain_map();
 
           } else {
@@ -328,17 +332,13 @@ private:
     auto request =
         std::make_shared<trusses_custom_interfaces::srv::
                              GetTerrainMapWithUncertainty::Request>();
-    // Use parameters from config
-    request->width = terrain_width_;
-    request->height = terrain_height_;
-    request->n_width_cells = terrain_width_cells_;
-    request->n_height_cells = terrain_height_cells_;
+    // Use the resolution array field from the service interface
+    request->resolution = {terrain_x_resolution_, terrain_y_resolution_};
 
     RCLCPP_INFO(this->get_logger(),
-                "Requesting terrain map with width: %f, height: %f, "
-                "width_cells: %d, height_cells: %d",
-                request->width, request->height, request->n_width_cells,
-                request->n_height_cells);
+                "Requesting terrain map with resolution: [%.2f, %.2f] "
+                "(service will calculate dimensions from data bounds)",
+                terrain_x_resolution_, terrain_y_resolution_);
 
     // Use callback-based async call
     terrain_map_client_->async_send_request(
@@ -346,18 +346,26 @@ private:
         [this](rclcpp::Client<
                trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>::
                    SharedFuture future) {
-          auto response = future.get();
-          if (response->success) {
+                  auto response = future.get();
+        if (response->success) {
+          RCLCPP_INFO(this->get_logger(),
+                      "Received terrain map: %s", response->message.c_str());
+          RCLCPP_INFO(this->get_logger(),
+                      "Map dimensions: %.2fm x %.2fm, grid: %dx%d",
+                      response->width, response->height,
+                      response->n_width_cells, response->n_height_cells);
 
-            // Process the terrain map data here
-            // response->x_coords, response->y_coords, response->values,
-            // response->uncertainties
-            process_terrain_map(response);
+          // Store grid dimensions for later use
+          terrain_width_cells_ = response->n_width_cells;
+          terrain_height_cells_ = response->n_height_cells;
 
-          } else {
-            RCLCPP_WARN(this->get_logger(), "Terrain map request failed: %s",
-                        response->message.c_str());
-          }
+          // Process the terrain map data here
+          process_terrain_map(response);
+
+        } else {
+          RCLCPP_WARN(this->get_logger(), "Terrain map request failed: %s",
+                      response->message.c_str());
+        }
         });
   }
 
@@ -667,11 +675,16 @@ private:
                           bg::model::polygon<bg::model::d2::point_xy<double>>>
                           &obstacle_polygons,
                       const std::vector<std::array<double, 2>> &safe_hull) {
-    // Calculate image bounds from terrain parameters
-    double x_min = -terrain_width_ / 2.0;
-    double x_max = terrain_width_ / 2.0;
-    double y_min = -terrain_height_ / 2.0;
-    double y_max = terrain_height_ / 2.0;
+    // Calculate image bounds from data points
+    if (D_.rows() == 0) {
+      RCLCPP_WARN(this->get_logger(), "No data points available for debug image");
+      return;
+    }
+    
+    double x_min = D_.col(0).minCoeff();
+    double x_max = D_.col(0).maxCoeff();
+    double y_min = D_.col(1).minCoeff();
+    double y_max = D_.col(1).maxCoeff();
 
     // Image size - use higher resolution for better visualization
     int img_width = 800;
