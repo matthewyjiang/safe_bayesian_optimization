@@ -120,6 +120,21 @@ public:
         this->create_publisher<visualization_msgs::msg::MarkerArray>(
             "/envelope_markers", 10);
 
+    // Create obstacle centers markers publisher
+    obstacle_centers_markers_pub_ =
+        this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/obstacle_centers_markers", 10);
+
+    // Create interpolated centers markers publisher
+    interpolated_centers_markers_pub_ =
+        this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/interpolated_centers_markers", 10);
+
+    // Create merged polygon markers publisher
+    merged_polygon_markers_pub_ =
+        this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/merged_polygon_markers", 10);
+
     // Create timer for control loop
     control_timer_ = this->create_wall_timer(
         std::chrono::milliseconds(500),
@@ -139,6 +154,12 @@ private:
       freespace_markers_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
       envelope_markers_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+      obstacle_centers_markers_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+      interpolated_centers_markers_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+      merged_polygon_markers_pub_;
   rclcpp::TimerBase::SharedPtr control_timer_;
 
   tf2_ros::Buffer tf_buffer_;
@@ -220,7 +241,7 @@ private:
     std::vector<polygon> polygon_list_merged;
     for (size_t i = 0; i < output_union.size(); i++) {
       polygon simplified_component;
-      bg::simplify(output_union[i], simplified_component, 2.0);
+      bg::simplify(output_union[i], simplified_component, 0.2);
       polygon_list_merged.push_back(simplified_component);
     }
 
@@ -275,6 +296,9 @@ private:
 
     auto merged_polygons = get_merged_dilated_polygons();
 
+    // Publish merged polygon markers for visualization
+    publish_merged_polygon_markers(merged_polygons);
+
     // Print merged polygons for gnuplot visualization
     RCLCPP_INFO(this->get_logger(),
                 "Printing %zu merged polygons before diffeo tree conversion:",
@@ -313,13 +337,18 @@ private:
   void envelope_callback(const geometry_msgs::msg::Polygon::SharedPtr msg) {
     // Convert ROS polygon to workspace format
     std::vector<std::vector<double>> workspace;
-    workspace.reserve(msg->points.size());
+    workspace.reserve(msg->points.size() + 1);
+
+    const auto &first_point = msg->points.front();
 
     for (const auto &point : msg->points) {
       std::vector<double> vertex = {static_cast<double>(point.x),
                                     static_cast<double>(point.y)};
       workspace.push_back(vertex);
     }
+
+    workspace.push_back({static_cast<double>(first_point.x),
+                         static_cast<double>(first_point.y)});
 
     // Update workspace in diffeomorphism parameters
     diffeo_params_.set_workspace(workspace);
@@ -546,6 +575,7 @@ private:
                          robot_position_transformed[1]);
 
     std::vector<mygal::Vector2<double>> obstacle_points;
+    std::vector<point> interpolated_points;
 
     obstacle_points.emplace_back(robot_position.get<0>(),
                                  robot_position.get<1>());
@@ -561,9 +591,16 @@ private:
 
       point result;
       bg::line_interpolate(l, obstacle_radius, result);
+      interpolated_points.push_back(result);
 
       obstacle_points.emplace_back(result.get<0>(), result.get<1>());
     }
+
+    // Publish obstacle centers markers
+    publish_obstacle_centers_markers(model_obstacle_centers);
+
+    // Publish interpolated centers markers
+    publish_interpolated_centers_markers(interpolated_points);
     auto algorithm = mygal::FortuneAlgorithm<double>(obstacle_points);
     algorithm.construct();
     algorithm.bound(mygal::Box<double>{static_cast<double>(env_x_min_ - 1),
@@ -710,6 +747,110 @@ private:
 
     marker_array.markers.push_back(marker);
     envelope_markers_pub_->publish(marker_array);
+  }
+
+  void
+  publish_obstacle_centers_markers(const std::vector<point> &obstacle_centers) {
+    auto marker_array = visualization_msgs::msg::MarkerArray();
+
+    for (size_t i = 0; i < obstacle_centers.size(); ++i) {
+      auto marker = visualization_msgs::msg::Marker();
+      marker.header.frame_id = "map";
+      marker.header.stamp = this->now();
+      marker.ns = "obstacle_centers";
+      marker.id = static_cast<int>(i);
+      marker.type = visualization_msgs::msg::Marker::SPHERE;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+
+      marker.pose.position.x = obstacle_centers[i].get<0>();
+      marker.pose.position.y = obstacle_centers[i].get<1>();
+      marker.pose.position.z = 0.0;
+      marker.pose.orientation.w = 1.0;
+
+      marker.scale.x = 0.2;
+      marker.scale.y = 0.2;
+      marker.scale.z = 0.2;
+
+      marker.color.r = 1.0;
+      marker.color.g = 0.0;
+      marker.color.b = 1.0; // Magenta for obstacle centers
+      marker.color.a = 1.0;
+
+      marker_array.markers.push_back(marker);
+    }
+
+    obstacle_centers_markers_pub_->publish(marker_array);
+  }
+
+  void publish_interpolated_centers_markers(
+      const std::vector<point> &interpolated_centers) {
+    auto marker_array = visualization_msgs::msg::MarkerArray();
+
+    for (size_t i = 0; i < interpolated_centers.size(); ++i) {
+      auto marker = visualization_msgs::msg::Marker();
+      marker.header.frame_id = "map";
+      marker.header.stamp = this->now();
+      marker.ns = "interpolated_centers";
+      marker.id = static_cast<int>(i);
+      marker.type = visualization_msgs::msg::Marker::SPHERE;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+
+      marker.pose.position.x = interpolated_centers[i].get<0>();
+      marker.pose.position.y = interpolated_centers[i].get<1>();
+      marker.pose.position.z = 0.0;
+      marker.pose.orientation.w = 1.0;
+
+      marker.scale.x = 0.15;
+      marker.scale.y = 0.15;
+      marker.scale.z = 0.15;
+
+      marker.color.r = 0.0;
+      marker.color.g = 1.0;
+      marker.color.b = 1.0; // Cyan for interpolated centers
+      marker.color.a = 1.0;
+
+      marker_array.markers.push_back(marker);
+    }
+
+    interpolated_centers_markers_pub_->publish(marker_array);
+  }
+
+  void
+  publish_merged_polygon_markers(const std::vector<polygon> &merged_polygons) {
+    auto marker_array = visualization_msgs::msg::MarkerArray();
+
+    for (size_t i = 0; i < merged_polygons.size(); ++i) {
+      auto marker = visualization_msgs::msg::Marker();
+      marker.header.frame_id = "map";
+      marker.header.stamp = this->get_clock()->now();
+      marker.ns = "merged_polygons";
+      marker.id = i;
+      marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+
+      marker.scale.x = 0.05;
+      marker.color.r = 1.0;
+      marker.color.g = 0.0;
+      marker.color.b = 1.0;
+      marker.color.a = 0.8;
+
+      const auto &poly = merged_polygons[i];
+      for (const auto &pt : poly.outer()) {
+        geometry_msgs::msg::Point point;
+        point.x = bg::get<0>(pt);
+        point.y = bg::get<1>(pt);
+        point.z = 0.0;
+        marker.points.push_back(point);
+      }
+
+      if (!marker.points.empty()) {
+        marker.points.push_back(marker.points[0]);
+      }
+
+      marker_array.markers.push_back(marker);
+    }
+
+    merged_polygon_markers_pub_->publish(marker_array);
   }
 };
 

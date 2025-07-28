@@ -44,16 +44,20 @@ public:
     // Declare parameters
     this->declare_parameter("opt.beta", 2.0);
     this->declare_parameter("opt.f_min", 0.0);
-    this->declare_parameter("terrain_map.resolution", std::vector<double>{0.1, 0.1});
+    this->declare_parameter("terrain_map.resolution",
+                            std::vector<double>{0.1, 0.1});
     this->declare_parameter("debug.publish_debug_image", false);
     this->declare_parameter("opt.subgoal_erosion", 0.2);
 
     // Read parameters
     beta_ = this->get_parameter("opt.beta").as_double();
     f_min_ = this->get_parameter("opt.f_min").as_double();
-    auto resolution_vector = this->get_parameter("terrain_map.resolution").as_double_array();
+    auto resolution_vector =
+        this->get_parameter("terrain_map.resolution").as_double_array();
     if (resolution_vector.size() != 2) {
-      RCLCPP_ERROR(this->get_logger(), "terrain_map.resolution must be an array of 2 values [x_resolution, y_resolution]");
+      RCLCPP_ERROR(this->get_logger(),
+                   "terrain_map.resolution must be an array of 2 values "
+                   "[x_resolution, y_resolution]");
       throw std::runtime_error("Invalid terrain_map.resolution parameter");
     }
     terrain_x_resolution_ = resolution_vector[0];
@@ -94,6 +98,11 @@ public:
     concave_markers_pub_ =
         this->create_publisher<visualization_msgs::msg::MarkerArray>(
             "/concave_markers", 10);
+
+    // Create projected goal marker publisher
+    projected_goal_marker_pub_ =
+        this->create_publisher<visualization_msgs::msg::Marker>(
+            "/projected_goal_marker", 10);
 
     // Only create debug image publisher if enabled
     if (publish_debug_image_) {
@@ -136,13 +145,15 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::Polygon>::SharedPtr envelope_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
       concave_markers_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr
+      projected_goal_marker_pub_;
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr debug_image_pub_;
 
   // Parameters from config
   double terrain_x_resolution_;
   double terrain_y_resolution_;
   bool publish_debug_image_;
-  
+
   // Terrain dimensions from service response
   int terrain_width_cells_;
   int terrain_height_cells_;
@@ -193,8 +204,9 @@ private:
     // Use stored grid dimensions from service response
     int width = terrain_width_cells_;
     int height = terrain_height_cells_;
-    
-    RCLCPP_INFO(this->get_logger(), "Using grid dimensions: %dx%d", width, height);
+
+    RCLCPP_INFO(this->get_logger(), "Using grid dimensions: %dx%d", width,
+                height);
 
     // Create binary image from safety data
     cv::Mat safety_image = cv::Mat::zeros(height, width, CV_8UC1);
@@ -298,7 +310,7 @@ private:
         trusses_custom_interfaces::srv::SpatialData::Request>();
 
     // Use callback-based async call
-            spatial_data_client_->async_send_request(
+    spatial_data_client_->async_send_request(
         request,
         [this](rclcpp::Client<trusses_custom_interfaces::srv::SpatialData>::
                    SharedFuture future) {
@@ -311,7 +323,8 @@ private:
             // Process the spatial data here
             // response->x_coords, response->y_coords, response->values
 
-            // Request terrain map with resolution (service will calculate dimensions from data bounds)
+            // Request terrain map with resolution (service will calculate
+            // dimensions from data bounds)
             request_terrain_map();
 
           } else {
@@ -333,7 +346,8 @@ private:
         std::make_shared<trusses_custom_interfaces::srv::
                              GetTerrainMapWithUncertainty::Request>();
     // Use the resolution array field from the service interface
-    request->resolution = {terrain_x_resolution_, terrain_y_resolution_};
+    request->resolution = {static_cast<float>(terrain_x_resolution_),
+                           static_cast<float>(terrain_y_resolution_)};
 
     RCLCPP_INFO(this->get_logger(),
                 "Requesting terrain map with resolution: [%.2f, %.2f] "
@@ -346,26 +360,22 @@ private:
         [this](rclcpp::Client<
                trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>::
                    SharedFuture future) {
-                  auto response = future.get();
-        if (response->success) {
-          RCLCPP_INFO(this->get_logger(),
-                      "Received terrain map: %s", response->message.c_str());
-          RCLCPP_INFO(this->get_logger(),
-                      "Map dimensions: %.2fm x %.2fm, grid: %dx%d",
-                      response->width, response->height,
-                      response->n_width_cells, response->n_height_cells);
+          auto response = future.get();
+          if (response->success) {
+            RCLCPP_INFO(this->get_logger(), "Received terrain map: %s",
+                        response->message.c_str());
 
-          // Store grid dimensions for later use
-          terrain_width_cells_ = response->n_width_cells;
-          terrain_height_cells_ = response->n_height_cells;
+            // Store grid dimensions for later use
+            terrain_width_cells_ = response->n_width_cells;
+            terrain_height_cells_ = response->n_height_cells;
 
-          // Process the terrain map data here
-          process_terrain_map(response);
+            // Process the terrain map data here
+            process_terrain_map(response);
 
-        } else {
-          RCLCPP_WARN(this->get_logger(), "Terrain map request failed: %s",
-                      response->message.c_str());
-        }
+          } else {
+            RCLCPP_WARN(this->get_logger(), "Terrain map request failed: %s",
+                        response->message.c_str());
+          }
         });
   }
 
@@ -449,6 +459,9 @@ private:
         subgoal.x = projection_result.projected_point.get<0>();
         subgoal.y = projection_result.projected_point.get<1>();
         subgoal.z = 0.0;
+
+        // Publish visualization of the projection
+        publish_projected_goal_marker(current_goal_, subgoal, projection_result.dist);
 
         RCLCPP_INFO(this->get_logger(),
                     "Published projected subgoal: (%f, %f) (distance: %f)",
@@ -677,10 +690,11 @@ private:
                       const std::vector<std::array<double, 2>> &safe_hull) {
     // Calculate image bounds from data points
     if (D_.rows() == 0) {
-      RCLCPP_WARN(this->get_logger(), "No data points available for debug image");
+      RCLCPP_WARN(this->get_logger(),
+                  "No data points available for debug image");
       return;
     }
-    
+
     double x_min = D_.col(0).minCoeff();
     double x_max = D_.col(0).maxCoeff();
     double y_min = D_.col(1).minCoeff();
@@ -857,6 +871,54 @@ private:
 
     marker_array.markers.push_back(marker);
     concave_markers_pub_->publish(marker_array);
+  }
+
+  void publish_projected_goal_marker(const geometry_msgs::msg::Point &original_goal,
+                                   const geometry_msgs::msg::Point &projected_goal,
+                                   double projection_distance) {
+    visualization_msgs::msg::Marker line_marker;
+    line_marker.header.frame_id = "map";
+    line_marker.header.stamp = this->get_clock()->now();
+    line_marker.ns = "projected_goal";
+    line_marker.id = 0;
+    line_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+    line_marker.action = visualization_msgs::msg::Marker::ADD;
+
+    // Line from original goal to projected goal
+    line_marker.points.push_back(original_goal);
+    line_marker.points.push_back(projected_goal);
+
+    line_marker.scale.x = 0.08; // Line width
+    line_marker.color.r = 1.0;  // Red line
+    line_marker.color.g = 0.0;
+    line_marker.color.b = 0.0;
+    line_marker.color.a = 0.9;
+
+    projected_goal_marker_pub_->publish(line_marker);
+
+    // Also publish arrow marker showing projection direction
+    visualization_msgs::msg::Marker arrow_marker;
+    arrow_marker.header.frame_id = "map";
+    arrow_marker.header.stamp = this->get_clock()->now();
+    arrow_marker.ns = "projected_goal";
+    arrow_marker.id = 1;
+    arrow_marker.type = visualization_msgs::msg::Marker::ARROW;
+    arrow_marker.action = visualization_msgs::msg::Marker::ADD;
+
+    arrow_marker.points.push_back(original_goal);
+    arrow_marker.points.push_back(projected_goal);
+
+    arrow_marker.scale.x = 0.05; // Shaft diameter
+    arrow_marker.scale.y = 0.1;  // Head diameter
+    arrow_marker.scale.z = 0.1;  // Head length
+    arrow_marker.color.r = 0.8;
+    arrow_marker.color.g = 0.2;
+    arrow_marker.color.b = 0.0;
+    arrow_marker.color.a = 0.8;
+
+    // Small delay to ensure line is published first
+    rclcpp::sleep_for(std::chrono::milliseconds(10));
+    projected_goal_marker_pub_->publish(arrow_marker);
   }
 };
 
