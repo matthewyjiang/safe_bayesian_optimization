@@ -2,6 +2,7 @@
 #include "reactive_planner_lib.h"
 #include "safe_bayesian_optimization/msg/polygon_array.hpp"
 
+#include <Eigen/Dense>
 #include <MyGAL/FortuneAlgorithm.h>
 #include <boost/geometry.hpp>
 #include <boost/geometry/algorithms/buffer.hpp>
@@ -323,16 +324,17 @@ private:
     std::vector<std::vector<double>> workspace = diffeo_params_.get_workspace();
     polygon envelope_polygon;
     if (!workspace.empty()) {
-      for (const auto& vertex : workspace) {
-        bg::append(envelope_polygon.outer(), 
-                   bg::model::point<double, 2, bg::cs::cartesian>(vertex[0], vertex[1]));
+      for (const auto &vertex : workspace) {
+        bg::append(envelope_polygon.outer(),
+                   bg::model::point<double, 2, bg::cs::cartesian>(vertex[0],
+                                                                  vertex[1]));
       }
       bg::correct(envelope_polygon);
     }
 
     // Collect clipped polygons for visualization
     std::vector<polygon> clipped_polygons;
-    
+
     diffeo_tree_array_.clear();
     for (const auto &merged_poly : merged_polygons) {
       if (merged_poly.outer().size() < 3) {
@@ -340,45 +342,45 @@ private:
                     "Skipping merged polygon with less than 3 vertices");
         continue;
       }
-      
+
       // Intersect merged polygon with envelope polygon
       multi_polygon intersection_result;
       polygon clipped_poly = merged_poly;
-      
+
       if (!workspace.empty() && bg::area(envelope_polygon) > 0.001) {
         bg::intersection(merged_poly, envelope_polygon, intersection_result);
-        
+
         if (intersection_result.empty()) {
-          RCLCPP_WARN(this->get_logger(),
-                      "Merged polygon has no intersection with envelope, skipping");
+          RCLCPP_WARN(
+              this->get_logger(),
+              "Merged polygon has no intersection with envelope, skipping");
           continue;
         }
-        
+
         // Use the largest intersection component
         double max_area = 0.0;
-        for (const auto& poly : intersection_result) {
+        for (const auto &poly : intersection_result) {
           double area = bg::area(poly);
           if (area > max_area) {
             max_area = area;
             clipped_poly = poly;
           }
         }
-        
+
         RCLCPP_INFO(this->get_logger(),
                     "Clipped polygon: original area=%.6f, clipped area=%.6f",
                     bg::area(merged_poly), bg::area(clipped_poly));
       }
-      
+
       // Skip if clipped polygon is too small
       if (bg::area(clipped_poly) < 0.01 || clipped_poly.outer().size() < 3) {
-        RCLCPP_WARN(this->get_logger(),
-                    "Clipped polygon too small, skipping");
+        RCLCPP_WARN(this->get_logger(), "Clipped polygon too small, skipping");
         continue;
       }
-      
+
       // Add valid clipped polygon to collection for visualization
       clipped_polygons.push_back(clipped_poly);
-      
+
       std::vector<TriangleClass> tree;
       RCLCPP_INFO(this->get_logger(),
                   "Converting clipped polygon to diffeomorphism tree");
@@ -540,68 +542,89 @@ private:
     }
 
     point subgoal_point(current_subgoal_.x, current_subgoal_.y);
-    point local_goal_linear = compute_local_goal_linear(
-        robot_position_point, transform_result.transformed_orientation,
-        local_free_space_polygon, subgoal_point);
+    // point local_goal_linear = compute_local_goal_linear(
+    //     robot_position_point, transform_result.transformed_orientation,
+    //     local_free_space_polygon, subgoal_point);
+    //
+    // point local_goal_angular =
+    //     compute_local_goal(local_free_space_polygon, subgoal_point);
+    //
+    // // Publish freespace markers for visualization
+    // publish_freespace_markers(local_free_space_polygon);
+    //
+    // // Compute the basis for the virtual control inputs
+    // double tV = (local_goal_linear.get<0>() -
+    //              transform_result.transformed_position[0]) *
+    //                 cos(transform_result.transformed_orientation) +
+    //             (local_goal_linear.get<1>() -
+    //              transform_result.transformed_position[1]) *
+    //                 sin(transform_result.transformed_orientation);
+    // double tW1 = (local_goal_angular.get<0>() -
+    //               transform_result.transformed_position[0]) *
+    //                  cos(transform_result.transformed_orientation) +
+    //              (local_goal_angular.get<1>() -
+    //               transform_result.transformed_position[1]) *
+    //                  sin(transform_result.transformed_orientation);
+    // double tW2 = -(local_goal_angular.get<0>() -
+    //                transform_result.transformed_position[0]) *
+    //                  sin(transform_result.transformed_orientation) +
+    //              (local_goal_angular.get<1>() -
+    //               transform_result.transformed_position[1]) *
+    //                  cos(transform_result.transformed_orientation);
+    //
+    // // Compute the basis for transforming to actual control inputs
+    //
+    // double alpha1 = transform_result.alpha1;
+    // double alpha2 = transform_result.alpha2;
+    // double beta1 = transform_result.beta1;
+    // double beta2 = transform_result.beta2;
+    //
+    // double e_norm = sqrt(pow(alpha1, 2) + pow(alpha2, 2));
+    // double dksi_dpsi =
+    //     MatrixDeterminant(transform_result.transformed_jacobian) /
+    //     pow(e_norm, 2);
+    // double DksiCosSin = (alpha1 * beta1 + alpha2 * beta2) / pow(e_norm, 2);
+    //
+    // double linear_ctl_gain, angular_ctl_gain;
+    // std::vector<double> limit_check_vector_linear = {
+    //     linear_gain_, linear_cmd_limit_ * e_norm / std::abs(tV),
+    //     0.4 * angular_cmd_limit_ * dksi_dpsi * e_norm /
+    //         std::abs(tV * DksiCosSin)};
+    // linear_ctl_gain = *std::min_element(limit_check_vector_linear.begin(),
+    //                                     limit_check_vector_linear.end());
+    // std::vector<double> limit_check_vector_angular = {
+    //     angular_gain_,
+    //     0.6 * angular_cmd_limit_ * dksi_dpsi / std::abs(std::atan2(tW2,
+    //     tW1))};
+    //
+    // angular_ctl_gain = *std::min_element(limit_check_vector_angular.begin(),
+    //                                      limit_check_vector_angular.end());
+    //
+    // // Compute virtual and actual inputs
+    // double dV_virtual = linear_ctl_gain * tV;
+    // double linear_cmd = dV_virtual / e_norm;
+    // double dW_virtual = angular_ctl_gain * std::atan2(tW2, tW1);
+    // double angular_cmd = (dW_virtual - linear_cmd * DksiCosSin) / dksi_dpsi;
 
-    point local_goal_angular =
+    point local_goal =
         compute_local_goal(local_free_space_polygon, subgoal_point);
 
-    // Publish freespace markers for visualization
-    publish_freespace_markers(local_free_space_polygon);
+    double robot_vel_x =
+        local_goal.get<0>() - transform_result.transformed_position[0];
+    double robot_vel_y =
+        local_goal.get<1>() - transform_result.transformed_position[1];
 
-    // Compute the basis for the virtual control inputs
-    double tV = (local_goal_linear.get<0>() -
-                 transform_result.transformed_position[0]) *
-                    cos(transform_result.transformed_orientation) +
-                (local_goal_linear.get<1>() -
-                 transform_result.transformed_position[1]) *
-                    sin(transform_result.transformed_orientation);
-    double tW1 = (local_goal_angular.get<0>() -
-                  transform_result.transformed_position[0]) *
-                     cos(transform_result.transformed_orientation) +
-                 (local_goal_angular.get<1>() -
-                  transform_result.transformed_position[1]) *
-                     sin(transform_result.transformed_orientation);
-    double tW2 = -(local_goal_angular.get<0>() -
-                   transform_result.transformed_position[0]) *
-                     sin(transform_result.transformed_orientation) +
-                 (local_goal_angular.get<1>() -
-                  transform_result.transformed_position[1]) *
-                     cos(transform_result.transformed_orientation);
+    auto jacobian =
+        Eigen::Matrix2d(transform_result.transformed_jacobian[0][0],
+                        transform_result.transformed_jacobian[0][1],
+                        transform_result.transformed_jacobian[1][0],
+                        transform_result.transformed_jacobian[1][1]);
+    // Compute the inverse Jacobian
+    Eigen::Matrix2d jacobian_inv =
+        jacobian.completeOrthogonalDecomposition().pseudoInverse();
 
-    // Compute the basis for transforming to actual control inputs
-
-    double alpha1 = transform_result.alpha1;
-    double alpha2 = transform_result.alpha2;
-    double beta1 = transform_result.beta1;
-    double beta2 = transform_result.beta2;
-
-    double e_norm = sqrt(pow(alpha1, 2) + pow(alpha2, 2));
-    double dksi_dpsi =
-        MatrixDeterminant(transform_result.transformed_jacobian) /
-        pow(e_norm, 2);
-    double DksiCosSin = (alpha1 * beta1 + alpha2 * beta2) / pow(e_norm, 2);
-
-    double linear_ctl_gain, angular_ctl_gain;
-    std::vector<double> limit_check_vector_linear = {
-        linear_gain_, linear_cmd_limit_ * e_norm / std::abs(tV),
-        0.4 * angular_cmd_limit_ * dksi_dpsi * e_norm /
-            std::abs(tV * DksiCosSin)};
-    linear_ctl_gain = *std::min_element(limit_check_vector_linear.begin(),
-                                        limit_check_vector_linear.end());
-    std::vector<double> limit_check_vector_angular = {
-        angular_gain_,
-        0.6 * angular_cmd_limit_ * dksi_dpsi / std::abs(std::atan2(tW2, tW1))};
-
-    angular_ctl_gain = *std::min_element(limit_check_vector_angular.begin(),
-                                         limit_check_vector_angular.end());
-
-    // Compute virtual and actual inputs
-    double dV_virtual = linear_ctl_gain * tV;
-    double linear_cmd = dV_virtual / e_norm;
-    double dW_virtual = angular_ctl_gain * std::atan2(tW2, tW1);
-    double angular_cmd = (dW_virtual - linear_cmd * DksiCosSin) / dksi_dpsi;
+    auto transformed_velocity =
+        jacobian_inv * Eigen::Vector2d(robot_vel_x, robot_vel_y);
 
     // Check if robot is within goal tolerance of subgoal
     double distance_to_subgoal =
@@ -611,16 +634,31 @@ private:
     if (distance_to_subgoal <= goal_tolerance_) {
       // Robot is within goal tolerance, stop movement
       cmd_vel.linear.x = 0.0;
+      cmd_vel.linear.y = 0.0;
+      cmd_vel.linear.z = 0.0;
+      cmd_vel.angular.x = 0.0;
+      cmd_vel.angular.y = 0.0;
       cmd_vel.angular.z = 0.0;
       RCLCPP_INFO(this->get_logger(),
                   "Robot within goal tolerance (%.3f <= %.3f), stopping",
                   distance_to_subgoal, goal_tolerance_);
     } else {
       // Normal control commands
-      cmd_vel.linear.x =
-          std::max(-linear_cmd_limit_, std::min(linear_cmd, linear_cmd_limit_));
-      cmd_vel.angular.z = std::max(-angular_cmd_limit_,
-                                   std::min(angular_cmd, angular_cmd_limit_));
+      // cmd_vel.linear.x =
+      //     std::max(-linear_cmd_limit_, std::min(linear_cmd,
+      //     linear_cmd_limit_));
+      // cmd_vel.angular.z = std::max(-angular_cmd_limit_,
+      //                              std::min(angular_cmd,
+      //                              angular_cmd_limit_));
+      //
+      // use only linear command limit for now
+      //
+      cmd_vel.linear.x = std::max(
+          -linear_cmd_limit_,
+          std::min(transformed_velocity[0] * linear_gain_, linear_cmd_limit_));
+      cmd_vel.linear.y = std::max(
+          -linear_cmd_limit_,
+          std::min(transformed_velocity[1] * linear_gain_, linear_cmd_limit_));
     }
 
     cmd_vel_pub_->publish(cmd_vel);
@@ -917,8 +955,8 @@ private:
     merged_polygon_markers_pub_->publish(marker_array);
   }
 
-  void
-  publish_clipped_polygon_markers(const std::vector<polygon> &clipped_polygons) {
+  void publish_clipped_polygon_markers(
+      const std::vector<polygon> &clipped_polygons) {
     auto marker_array = visualization_msgs::msg::MarkerArray();
 
     for (size_t i = 0; i < clipped_polygons.size(); ++i) {
@@ -932,9 +970,9 @@ private:
 
       marker.scale.x = 0.06; // Slightly thicker than merged polygons
       marker.color.r = 0.0;
-      marker.color.g = 0.8;  // Green color to distinguish from merged (magenta)
+      marker.color.g = 0.8; // Green color to distinguish from merged (magenta)
       marker.color.b = 0.2;
-      marker.color.a = 1.0;  // Fully opaque
+      marker.color.a = 1.0; // Fully opaque
 
       const auto &poly = clipped_polygons[i];
       for (const auto &pt : poly.outer()) {
