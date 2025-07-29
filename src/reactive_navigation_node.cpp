@@ -173,7 +173,7 @@ private:
   double angular_cmd_limit_;
   double goal_tolerance_;
   std::vector<polygon> obstacle_polygons_;
-  std::vector<std::vector<PolygonClass>> diffeo_tree_array_;
+  std::vector<std::vector<TriangleClass>> diffeo_tree_array_;
 
   // Robot state
   geometry_msgs::msg::Point current_position_;
