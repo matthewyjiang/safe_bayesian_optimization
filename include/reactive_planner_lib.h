@@ -253,9 +253,8 @@ struct DiffeoTransformResult {
 };
 
 DiffeoTransformResult computeDiffeoTransform(
-    std::vector<double> robot_position,
-    double robot_orientation,
-    std::vector<std::vector<PolygonClass>> diffeo_tree_array,
+    std::vector<double> robot_position, double robot_orientation,
+    std::vector<std::vector<TriangleClass>> diffeo_tree_array,
     DiffeoParamsClass diffeo_params);
 
 #endif // REACTIVE_PLANNER_LIB_H
