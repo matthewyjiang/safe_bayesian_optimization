@@ -253,8 +253,7 @@ struct DiffeoTransformResult {
 };
 
 DiffeoTransformResult computeDiffeoTransform(
-    std::vector<double> robot_position,
-    double robot_orientation,
+    std::vector<double> robot_position, double robot_orientation,
     std::vector<std::vector<TriangleClass>> diffeo_tree_array,
     DiffeoParamsClass diffeo_params);
 
