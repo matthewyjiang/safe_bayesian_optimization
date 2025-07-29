@@ -319,11 +319,12 @@ private:
                     "Skipping merged polygon with area < 0.01");
         continue;
       }
-      std::vector<PolygonClass> tree;
+      std::vector<TriangleClass> tree;
       RCLCPP_INFO(this->get_logger(),
                   "Converting merged polygon to diffeomorphism tree");
-      diffeoTreeConvex(BoostPointToStd(BoostPolyToBoostPoint(merged_poly)),
-                       diffeo_params_, &tree);
+      diffeoTreeTriangulation(
+          BoostPointToStd(BoostPolyToBoostPoint(merged_poly)), diffeo_params_,
+          &tree);
       diffeo_tree_array_.push_back(tree);
     }
     RCLCPP_INFO(this->get_logger(),
