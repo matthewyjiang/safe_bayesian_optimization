@@ -135,6 +135,11 @@ public:
         this->create_publisher<visualization_msgs::msg::MarkerArray>(
             "/merged_polygon_markers", 10);
 
+    // Create clipped polygon markers publisher
+    clipped_polygon_markers_pub_ =
+        this->create_publisher<visualization_msgs::msg::MarkerArray>(
+            "/clipped_polygon_markers", 10);
+
     // Create timer for control loop
     control_timer_ = this->create_wall_timer(
         std::chrono::milliseconds(500),
@@ -160,6 +165,8 @@ private:
       interpolated_centers_markers_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
       merged_polygon_markers_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+      clipped_polygon_markers_pub_;
   rclcpp::TimerBase::SharedPtr control_timer_;
 
   tf2_ros::Buffer tf_buffer_;
@@ -312,21 +319,77 @@ private:
 
     // Visualize merged polygons in gnuplot format
 
+    // Get envelope polygon for intersection
+    std::vector<std::vector<double>> workspace = diffeo_params_.get_workspace();
+    polygon envelope_polygon;
+    if (!workspace.empty()) {
+      for (const auto& vertex : workspace) {
+        bg::append(envelope_polygon.outer(), 
+                   bg::model::point<double, 2, bg::cs::cartesian>(vertex[0], vertex[1]));
+      }
+      bg::correct(envelope_polygon);
+    }
+
+    // Collect clipped polygons for visualization
+    std::vector<polygon> clipped_polygons;
+    
     diffeo_tree_array_.clear();
     for (const auto &merged_poly : merged_polygons) {
       if (merged_poly.outer().size() < 3) {
         RCLCPP_WARN(this->get_logger(),
-                    "Skipping merged polygon with area < 0.01");
+                    "Skipping merged polygon with less than 3 vertices");
         continue;
       }
+      
+      // Intersect merged polygon with envelope polygon
+      multi_polygon intersection_result;
+      polygon clipped_poly = merged_poly;
+      
+      if (!workspace.empty() && bg::area(envelope_polygon) > 0.001) {
+        bg::intersection(merged_poly, envelope_polygon, intersection_result);
+        
+        if (intersection_result.empty()) {
+          RCLCPP_WARN(this->get_logger(),
+                      "Merged polygon has no intersection with envelope, skipping");
+          continue;
+        }
+        
+        // Use the largest intersection component
+        double max_area = 0.0;
+        for (const auto& poly : intersection_result) {
+          double area = bg::area(poly);
+          if (area > max_area) {
+            max_area = area;
+            clipped_poly = poly;
+          }
+        }
+        
+        RCLCPP_INFO(this->get_logger(),
+                    "Clipped polygon: original area=%.6f, clipped area=%.6f",
+                    bg::area(merged_poly), bg::area(clipped_poly));
+      }
+      
+      // Skip if clipped polygon is too small
+      if (bg::area(clipped_poly) < 0.01 || clipped_poly.outer().size() < 3) {
+        RCLCPP_WARN(this->get_logger(),
+                    "Clipped polygon too small, skipping");
+        continue;
+      }
+      
+      // Add valid clipped polygon to collection for visualization
+      clipped_polygons.push_back(clipped_poly);
+      
       std::vector<TriangleClass> tree;
       RCLCPP_INFO(this->get_logger(),
-                  "Converting merged polygon to diffeomorphism tree");
+                  "Converting clipped polygon to diffeomorphism tree");
       diffeoTreeTriangulation(
-          BoostPointToStd(BoostPolyToBoostPoint(merged_poly)), diffeo_params_,
+          BoostPointToStd(BoostPolyToBoostPoint(clipped_poly)), diffeo_params_,
           &tree);
       diffeo_tree_array_.push_back(tree);
     }
+
+    // Publish clipped polygon markers for visualization
+    publish_clipped_polygon_markers(clipped_polygons);
     RCLCPP_INFO(this->get_logger(),
                 "Done converting merged polygon to diffeomorphism tree");
 
@@ -852,6 +915,44 @@ private:
     }
 
     merged_polygon_markers_pub_->publish(marker_array);
+  }
+
+  void
+  publish_clipped_polygon_markers(const std::vector<polygon> &clipped_polygons) {
+    auto marker_array = visualization_msgs::msg::MarkerArray();
+
+    for (size_t i = 0; i < clipped_polygons.size(); ++i) {
+      auto marker = visualization_msgs::msg::Marker();
+      marker.header.frame_id = "map";
+      marker.header.stamp = this->get_clock()->now();
+      marker.ns = "clipped_polygons";
+      marker.id = i;
+      marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+
+      marker.scale.x = 0.06; // Slightly thicker than merged polygons
+      marker.color.r = 0.0;
+      marker.color.g = 0.8;  // Green color to distinguish from merged (magenta)
+      marker.color.b = 0.2;
+      marker.color.a = 1.0;  // Fully opaque
+
+      const auto &poly = clipped_polygons[i];
+      for (const auto &pt : poly.outer()) {
+        geometry_msgs::msg::Point point;
+        point.x = bg::get<0>(pt);
+        point.y = bg::get<1>(pt);
+        point.z = 0.0;
+        marker.points.push_back(point);
+      }
+
+      if (!marker.points.empty()) {
+        marker.points.push_back(marker.points[0]);
+      }
+
+      marker_array.markers.push_back(marker);
+    }
+
+    clipped_polygon_markers_pub_->publish(marker_array);
   }
 };
 
