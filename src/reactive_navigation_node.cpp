@@ -3,7 +3,6 @@
 #include "safe_bayesian_optimization/msg/polygon_array.hpp"
 
 #include <Eigen/Dense>
-#include <MyGAL/FortuneAlgorithm.h>
 #include <boost/geometry.hpp>
 #include <boost/geometry/algorithms/buffer.hpp>
 #include <boost/geometry/algorithms/detail/sections/sectionalize.hpp>
@@ -146,6 +145,11 @@ public:
         this->create_publisher<visualization_msgs::msg::Marker>(
             "/local_goal_marker", 10);
 
+    // Create transformed position marker publisher
+    transformed_position_marker_pub_ =
+        this->create_publisher<visualization_msgs::msg::Marker>(
+            "/transformed_position_marker", 10);
+
     // Create timer for control loop
     control_timer_ = this->create_wall_timer(
         std::chrono::milliseconds(500),
@@ -175,6 +179,8 @@ private:
       clipped_polygon_markers_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr
       local_goal_marker_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr
+      transformed_position_marker_pub_;
   rclcpp::TimerBase::SharedPtr control_timer_;
 
   tf2_ros::Buffer tf_buffer_;
@@ -480,6 +486,9 @@ private:
     DiffeoTransformResult transform_result = computeDiffeoTransform(
         robot_position, current_yaw_, diffeo_tree_array_, diffeo_params_);
 
+    // Publish transformed position marker for visualization
+    publish_transformed_position_marker(transform_result.transformed_position);
+
     std::vector<point> model_obstacle_centers;
     std::vector<double> model_obstacle_radii;
 
@@ -636,8 +645,10 @@ private:
     // Compute the inverse Jacobian
     Eigen::Matrix2d jacobian_inv = jacobian.inverse();
 
-    auto transformed_velocity =
-        jacobian_inv * Eigen::Vector2d(robot_vel_x, robot_vel_y);
+    // auto transformed_velocity =
+    //     jacobian_inv * Eigen::Vector2d(robot_vel_x, robot_vel_y);
+
+    auto transformed_velocity = Eigen::Vector2d(robot_vel_x, robot_vel_y);
         
 
     // Check if robot is within goal tolerance of subgoal
@@ -697,7 +708,159 @@ private:
 
     RCLCPP_INFO(this->get_logger(),
                 "Published cmd_vel: linear.x=%.3f, angular.z=%.3f",
-                cmd_vel.linear.x, cmd_vel.linear.zy);
+                cmd_vel.linear.x, cmd_vel.angular.z);
+  }
+
+  polygon compute_robot_voronoi_cell(const point& robot_pos, const std::vector<point>& obstacle_centers) {
+    // Start with the environment boundary as initial polygon
+    polygon result_polygon;
+    bg::append(result_polygon.outer(), bg::model::point<double, 2, bg::cs::cartesian>(env_x_min_, env_y_min_));
+    bg::append(result_polygon.outer(), bg::model::point<double, 2, bg::cs::cartesian>(env_x_max_, env_y_min_));
+    bg::append(result_polygon.outer(), bg::model::point<double, 2, bg::cs::cartesian>(env_x_max_, env_y_max_));
+    bg::append(result_polygon.outer(), bg::model::point<double, 2, bg::cs::cartesian>(env_x_min_, env_y_max_));
+    bg::append(result_polygon.outer(), bg::model::point<double, 2, bg::cs::cartesian>(env_x_min_, env_y_min_)); // Close polygon
+    bg::correct(result_polygon);
+    
+    // For each obstacle center, clip the polygon with the half-plane closer to robot
+    for (const auto& obstacle_center : obstacle_centers) {
+      // Skip if obstacle is at robot position
+      double dx = obstacle_center.get<0>() - robot_pos.get<0>();
+      double dy = obstacle_center.get<1>() - robot_pos.get<1>();
+      double dist_sq = dx * dx + dy * dy;
+      if (dist_sq < 1e-9) {
+        continue;
+      }
+      
+      // Perpendicular bisector: points equidistant from robot and obstacle
+      // The half-plane closer to robot is where: distance_to_robot < distance_to_obstacle
+      // This is equivalent to: (x-rx)² + (y-ry)² < (x-ox)² + (y-oy)²
+      // Simplifying: 2*(ox-rx)*x + 2*(oy-ry)*y < ox²+oy²-rx²-ry²
+      
+      double rx = robot_pos.get<0>();
+      double ry = robot_pos.get<1>();
+      double ox = obstacle_center.get<0>();
+      double oy = obstacle_center.get<1>();
+      
+      // Create a large polygon representing the half-plane closer to robot
+      // Half-plane: 2*(ox-rx)*x + 2*(oy-ry)*y < ox²+oy²-rx²-ry²
+      double a = 2.0 * (ox - rx);
+      double b = 2.0 * (oy - ry);
+      double c = ox*ox + oy*oy - rx*rx - ry*ry;
+      
+      // Create a large rectangle and keep only points satisfying the half-plane constraint
+      double extend = 1000.0;
+      std::vector<std::pair<double, double>> boundary_points = {
+        {env_x_min_ - extend, env_y_min_ - extend},
+        {env_x_max_ + extend, env_y_min_ - extend},
+        {env_x_max_ + extend, env_y_max_ + extend},
+        {env_x_min_ - extend, env_y_max_ + extend}
+      };
+      
+      // Find which corner points satisfy the half-plane constraint
+      std::vector<std::pair<double, double>> valid_points;
+      for (const auto& p : boundary_points) {
+        if (a * p.first + b * p.second < c) { // Robot side of bisector
+          valid_points.push_back(p);
+        }
+      }
+      
+      // Add intersection points with boundary edges
+      // Check intersection with each edge of the extended rectangle
+      std::vector<std::pair<double, double>> intersections;
+      
+      // Bottom edge: y = env_y_min_ - extend
+      if (std::abs(b) > 1e-9) {
+        double y = env_y_min_ - extend;
+        double x = (c - b * y) / a;
+        if (x >= env_x_min_ - extend && x <= env_x_max_ + extend) {
+          intersections.push_back({x, y});
+        }
+      }
+      
+      // Top edge: y = env_y_max_ + extend
+      if (std::abs(b) > 1e-9) {
+        double y = env_y_max_ + extend;
+        double x = (c - b * y) / a;
+        if (x >= env_x_min_ - extend && x <= env_x_max_ + extend) {
+          intersections.push_back({x, y});
+        }
+      }
+      
+      // Left edge: x = env_x_min_ - extend
+      if (std::abs(a) > 1e-9) {
+        double x = env_x_min_ - extend;
+        double y = (c - a * x) / b;
+        if (y >= env_y_min_ - extend && y <= env_y_max_ + extend) {
+          intersections.push_back({x, y});
+        }
+      }
+      
+      // Right edge: x = env_x_max_ + extend
+      if (std::abs(a) > 1e-9) {
+        double x = env_x_max_ + extend;
+        double y = (c - a * x) / b;
+        if (y >= env_y_min_ - extend && y <= env_y_max_ + extend) {
+          intersections.push_back({x, y});
+        }
+      }
+      
+      // Combine valid corner points and intersections
+      for (const auto& intersection : intersections) {
+        valid_points.push_back(intersection);
+      }
+      
+      // Create half-plane polygon if we have enough points
+      if (valid_points.size() >= 3) {
+        // Sort points counter-clockwise around centroid
+        double cx = 0, cy = 0;
+        for (const auto& p : valid_points) {
+          cx += p.first;
+          cy += p.second;
+        }
+        cx /= valid_points.size();
+        cy /= valid_points.size();
+        
+        std::sort(valid_points.begin(), valid_points.end(),
+                  [cx, cy](const std::pair<double, double>& a, const std::pair<double, double>& b) {
+                    return std::atan2(a.second - cy, a.first - cx) < std::atan2(b.second - cy, b.first - cx);
+                  });
+        
+        // Create polygon
+        polygon half_plane;
+        for (const auto& p : valid_points) {
+          bg::append(half_plane.outer(), bg::model::point<double, 2, bg::cs::cartesian>(p.first, p.second));
+        }
+        bg::append(half_plane.outer(), bg::model::point<double, 2, bg::cs::cartesian>(valid_points[0].first, valid_points[0].second)); // Close
+        bg::correct(half_plane);
+        
+        // Intersect current result with this half-plane
+        multi_polygon intersection_result;
+        bg::intersection(result_polygon, half_plane, intersection_result);
+        
+        if (!intersection_result.empty()) {
+          // Find the largest intersection component
+          double max_area = 0;
+          size_t best_idx = 0;
+          for (size_t i = 0; i < intersection_result.size(); ++i) {
+            double area = bg::area(intersection_result[i]);
+            if (area > max_area) {
+              max_area = area;
+              best_idx = i;
+            }
+          }
+          result_polygon = intersection_result[best_idx];
+        } else {
+          RCLCPP_WARN(this->get_logger(), "No intersection found with half-plane for obstacle at (%.3f, %.3f)", 
+                      obstacle_center.get<0>(), obstacle_center.get<1>());
+        }
+      }
+    }
+    
+    RCLCPP_DEBUG(this->get_logger(), 
+                 "Computed robot Voronoi cell with %zu vertices", 
+                 result_polygon.outer().size());
+    
+    return result_polygon;
   }
 
   polygon compute_local_workspace_polygon(
@@ -708,55 +871,34 @@ private:
     point robot_position(robot_position_transformed[0],
                          robot_position_transformed[1]);
 
-    std::vector<mygal::Vector2<double>> obstacle_points;
-    std::vector<point> interpolated_points;
-
-    obstacle_points.emplace_back(robot_position.get<0>(),
-                                 robot_position.get<1>());
-
-    // get the points on the obstacle radius that are closest to the robot
+    // Get the points on the obstacle radius that are closest to the robot
+    std::vector<point> interpolated_obstacle_centers;
     for (size_t i = 0; i < model_obstacle_centers.size(); ++i) {
-
       point obstacle_center = model_obstacle_centers[i];
       double obstacle_radius = model_obstacle_radii[i];
-      line l;
-      l.push_back(obstacle_center);
-      l.push_back(robot_position);
+      
+      if (obstacle_radius > 1e-9) { // Only interpolate if radius is non-zero
+        line l;
+        l.push_back(obstacle_center);
+        l.push_back(robot_position);
 
-      point result;
-      bg::line_interpolate(l, obstacle_radius, result);
-      interpolated_points.push_back(result);
-
-      obstacle_points.emplace_back(result.get<0>(), result.get<1>());
+        point result;
+        bg::line_interpolate(l, obstacle_radius, result);
+        interpolated_obstacle_centers.push_back(result);
+      } else {
+        // If radius is zero, use the obstacle center directly
+        interpolated_obstacle_centers.push_back(obstacle_center);
+      }
     }
 
     // Publish obstacle centers markers
     publish_obstacle_centers_markers(model_obstacle_centers);
-
+    
     // Publish interpolated centers markers
-    publish_interpolated_centers_markers(interpolated_points);
-    auto algorithm = mygal::FortuneAlgorithm<double>(obstacle_points);
-    algorithm.construct();
-    algorithm.bound(mygal::Box<double>{static_cast<double>(env_x_min_ - 1),
-                                       static_cast<double>(env_y_min_ - 1),
-                                       static_cast<double>(env_x_max_ + 1),
-                                       static_cast<double>(env_y_max_ + 1)});
-    auto diagram = algorithm.getDiagram();
-    diagram.intersect(mygal::Box<double>{
-        static_cast<double>(env_x_min_), static_cast<double>(env_y_min_),
-        static_cast<double>(env_x_max_), static_cast<double>(env_y_max_)});
-    auto site = diagram.getSites().begin();
-    auto face = site->face;
-    auto he = face->outerComponent;
-
-    polygon local_workspace_polygon;
-    while (he->next != face->outerComponent) {
-      he = he->next;
-      auto vertex = he->origin->point;
-      bg::append(
-          local_workspace_polygon.outer(),
-          bg::model::point<double, 2, bg::cs::cartesian>(vertex.x, vertex.y));
-    }
+    publish_interpolated_centers_markers(interpolated_obstacle_centers);
+    
+    // Compute robot's Voronoi cell directly using half-plane intersections
+    polygon local_workspace_polygon = compute_robot_voronoi_cell(robot_position, interpolated_obstacle_centers);
 
     return local_workspace_polygon;
   }
@@ -765,7 +907,7 @@ private:
                                  polygon local_free_space_polygon) {
 
     line free_space_line;
-    if (bg::area(local_free_space_polygon) < 0.01) {
+    if (bg::area(local_free_space_polygon) < 0.001) {
       free_space_line.push_back(robot_position);
       free_space_line.push_back(robot_position);
       return free_space_line;
@@ -793,15 +935,11 @@ private:
   }
 
   point compute_local_goal(polygon lfs, point goal) {
-    if (bg::area(lfs) < 0.01) {
-      return goal;
+    if (bg::within(goal, lfs)) {
+      return goal; // Goal is already within local free space
     } else {
-      if (bg::within(goal, lfs)) {
-        return goal; // Goal is already within local free space
-      } else {
         ProjectionResultStruct projection_result = polydist(lfs, goal);
-        return projection_result.projected_point;
-      }
+      return projection_result.projected_point;
     }
   }
 
@@ -1055,6 +1193,38 @@ private:
     marker.lifetime = rclcpp::Duration::from_nanoseconds(0);
 
     local_goal_marker_pub_->publish(marker);
+  }
+
+  void publish_transformed_position_marker(const std::vector<double> &transformed_position) {
+    auto marker = visualization_msgs::msg::Marker();
+    marker.header.frame_id = "map";
+    marker.header.stamp = this->get_clock()->now();
+    marker.ns = "transformed_position";
+    marker.id = 0;
+    marker.type = visualization_msgs::msg::Marker::SPHERE;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+
+    // Set position
+    marker.pose.position.x = transformed_position[0];
+    marker.pose.position.y = transformed_position[1];
+    marker.pose.position.z = 0.2; // Elevated for visibility
+    marker.pose.orientation.w = 1.0;
+
+    // Set scale (sphere radius)
+    marker.scale.x = 0.25;
+    marker.scale.y = 0.25;
+    marker.scale.z = 0.25;
+
+    // Set color (bright orange to distinguish from other markers)
+    marker.color.r = 1.0;
+    marker.color.g = 0.5;
+    marker.color.b = 0.0;
+    marker.color.a = 1.0;
+
+    // Set lifetime (marker persists until updated)
+    marker.lifetime = rclcpp::Duration::from_nanoseconds(0);
+
+    transformed_position_marker_pub_->publish(marker);
   }
 };
 
