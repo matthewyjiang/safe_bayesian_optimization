@@ -194,7 +194,7 @@ private:
   double angular_cmd_limit_;
   double goal_tolerance_;
   std::vector<polygon> obstacle_polygons_;
-  std::vector<std::vector<TriangleClass>> diffeo_tree_array_;
+  std::vector<std::vector<PolygonClass>> diffeo_tree_array_;
 
   // Robot state
   geometry_msgs::msg::Point current_position_;
@@ -394,10 +394,10 @@ private:
       // Add valid clipped polygon to collection for visualization
       clipped_polygons.push_back(clipped_poly);
 
-      std::vector<TriangleClass> tree;
+      std::vector<PolygonClass> tree;
       RCLCPP_INFO(this->get_logger(),
                   "Converting clipped polygon to diffeomorphism tree");
-      diffeoTreeTriangulation(
+      diffeoTreeConvex(
           BoostPointToStd(BoostPolyToBoostPoint(clipped_poly)), diffeo_params_,
           &tree);
       diffeo_tree_array_.push_back(tree);

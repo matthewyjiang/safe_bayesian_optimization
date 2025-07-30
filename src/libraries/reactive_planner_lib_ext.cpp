@@ -2,7 +2,7 @@
 
 DiffeoTransformResult computeDiffeoTransform(
     std::vector<double> robot_position, double robot_orientation,
-    std::vector<std::vector<TriangleClass>> diffeo_tree_array,
+    std::vector<std::vector<PolygonClass>> diffeo_tree_array,
     DiffeoParamsClass diffeo_params, rclcpp::Logger logger) {
 
   std::vector<double> RobotPositionTransformed = {robot_position[0],
@@ -16,7 +16,7 @@ DiffeoTransformResult computeDiffeoTransform(
     RCLCPP_INFO(logger, "Transform iteration %zu: position before [%.3f, %.3f]", 
                 i, RobotPositionTransformed[0], RobotPositionTransformed[1]);
     
-    OutputStructVector TempTransformation = polygonDiffeoTriangulation(
+    OutputStructVector TempTransformation = polygonDiffeoConvex(
         RobotPositionTransformed, diffeo_tree_array[i], diffeo_params);
 
     std::vector<double> TempPositionTransformed = TempTransformation.Value;
