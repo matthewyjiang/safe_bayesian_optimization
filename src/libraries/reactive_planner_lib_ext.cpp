@@ -1,9 +1,9 @@
 #include <reactive_planner_lib.h>
 
 DiffeoTransformResult computeDiffeoTransform(
-    std::vector<double> robot_position, double robot_orientation,
-    std::vector<std::vector<PolygonClass>> diffeo_tree_array,
-    DiffeoParamsClass diffeo_params, rclcpp::Logger logger) {
+    std::vector<double> &robot_position, double robot_orientation,
+    std::vector<std::vector<PolygonClass>> &diffeo_tree_array,
+    DiffeoParamsClass &diffeo_params, rclcpp::Logger logger) {
 
   std::vector<double> RobotPositionTransformed = {robot_position[0],
                                                   robot_position[1]};
@@ -13,9 +13,9 @@ DiffeoTransformResult computeDiffeoTransform(
                                                     0.0, 0.0, 0.0, 0.0};
 
   for (size_t i = 0; i < diffeo_tree_array.size(); i++) {
-    RCLCPP_INFO(logger, "Transform iteration %zu: position before [%.3f, %.3f]", 
+    RCLCPP_INFO(logger, "Transform iteration %zu: position before [%.3f, %.3f]",
                 i, RobotPositionTransformed[0], RobotPositionTransformed[1]);
-    
+
     OutputStructVector TempTransformation = polygonDiffeoConvex(
         RobotPositionTransformed, diffeo_tree_array[i], diffeo_params);
 
@@ -110,8 +110,8 @@ DiffeoTransformResult computeDiffeoTransform(
     RobotPositionTransformedD = MatrixMatrixMultiplication(
         TempPositionTransformedD, RobotPositionTransformedD);
     RobotPositionTransformed = TempPositionTransformed;
-    
-    RCLCPP_INFO(logger, "Transform iteration %zu: position after [%.3f, %.3f]", 
+
+    RCLCPP_INFO(logger, "Transform iteration %zu: position after [%.3f, %.3f]",
                 i, RobotPositionTransformed[0], RobotPositionTransformed[1]);
   }
 
