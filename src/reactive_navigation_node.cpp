@@ -488,7 +488,7 @@ private:
     RCLCPP_INFO(this->get_logger(), "Diffeo tree array size: %zu", diffeo_tree_array_.size());
 
     DiffeoTransformResult transform_result = computeDiffeoTransform(
-        robot_position, current_yaw_, diffeo_tree_array_, diffeo_params_);
+        robot_position, current_yaw_, diffeo_tree_array_, diffeo_params_, this->get_logger());
 
     // Publish transformed position marker for visualization
     publish_transformed_position_marker(transform_result.transformed_position);

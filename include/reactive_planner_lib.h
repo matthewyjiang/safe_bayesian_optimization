@@ -31,6 +31,9 @@
 #include <boost/geometry/geometries/point.hpp>
 #include <boost/geometry/geometries/polygon.hpp>
 
+// ROS imports
+#include <rclcpp/rclcpp.hpp>
+
 // Local imports
 #include <polygeom_lib.h>
 
@@ -255,6 +258,6 @@ struct DiffeoTransformResult {
 DiffeoTransformResult computeDiffeoTransform(
     std::vector<double> robot_position, double robot_orientation,
     std::vector<std::vector<TriangleClass>> diffeo_tree_array,
-    DiffeoParamsClass diffeo_params);
+    DiffeoParamsClass diffeo_params, rclcpp::Logger logger);
 
 #endif // REACTIVE_PLANNER_LIB_H
