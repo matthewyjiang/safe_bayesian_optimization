@@ -969,8 +969,55 @@ private:
     if (bg::within(goal, lfs)) {
       return goal; // Goal is already within local free space
     } else {
-        ProjectionResultStruct projection_result = polydist(lfs, goal);
-      return projection_result.projected_point;
+      // Find the closest point on the polygon boundary
+      double min_distance = std::numeric_limits<double>::max();
+      point closest_point = goal;
+      
+      const auto& ring = lfs.outer();
+      if (ring.size() < 3) {
+        return goal; // Invalid polygon
+      }
+      
+      // Check each edge of the polygon
+      for (size_t i = 0; i < ring.size() - 1; ++i) {
+        point p1 = ring[i];
+        point p2 = ring[i + 1];
+        
+        // Vector from p1 to p2
+        double dx = p2.get<0>() - p1.get<0>();
+        double dy = p2.get<1>() - p1.get<1>();
+        
+        // Vector from p1 to goal
+        double px = goal.get<0>() - p1.get<0>();
+        double py = goal.get<1>() - p1.get<1>();
+        
+        // Project goal onto the infinite line through p1-p2
+        double edge_length_sq = dx * dx + dy * dy;
+        point projected_point;
+        
+        if (edge_length_sq < 1e-9) {
+          // Degenerate edge (p1 == p2), use p1
+          projected_point = point(p1.get<0>(), p1.get<1>());
+        } else {
+          // Parameter t for projection: 0 = p1, 1 = p2
+          double t = (px * dx + py * dy) / edge_length_sq;
+          
+          // Clamp t to [0,1] to stay within the edge segment
+          t = std::max(0.0, std::min(1.0, t));
+          
+          // Compute the closest point on this edge
+          projected_point = point(p1.get<0>() + t * dx, p1.get<1>() + t * dy);
+        }
+        
+        // Check if this is the closest point so far
+        double distance = bg::distance(goal, projected_point);
+        if (distance < min_distance) {
+          min_distance = distance;
+          closest_point = projected_point;
+        }
+      }
+      
+      return closest_point;
     }
   }
 
