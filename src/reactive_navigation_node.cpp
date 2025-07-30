@@ -141,6 +141,11 @@ public:
         this->create_publisher<visualization_msgs::msg::MarkerArray>(
             "/clipped_polygon_markers", 10);
 
+    // Create local goal marker publisher
+    local_goal_marker_pub_ =
+        this->create_publisher<visualization_msgs::msg::Marker>(
+            "/local_goal_marker", 10);
+
     // Create timer for control loop
     control_timer_ = this->create_wall_timer(
         std::chrono::milliseconds(500),
@@ -168,6 +173,8 @@ private:
       merged_polygon_markers_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
       clipped_polygon_markers_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr
+      local_goal_marker_pub_;
   rclcpp::TimerBase::SharedPtr control_timer_;
 
   tf2_ros::Buffer tf_buffer_;
@@ -532,6 +539,10 @@ private:
                   "Buffer operation failed, using original polygon");
       local_free_space_polygon = local_workspace_polygon;
     }
+
+    // Publish freespace markers for visualization
+    publish_freespace_markers(local_free_space_polygon);
+
     point robot_position_point(transform_result.transformed_position[0],
                                transform_result.transformed_position[1]);
 
@@ -609,22 +620,25 @@ private:
     point local_goal =
         compute_local_goal(local_free_space_polygon, subgoal_point);
 
+    // Publish local goal marker for visualization
+    publish_local_goal_marker(local_goal);
+
     double robot_vel_x =
         local_goal.get<0>() - transform_result.transformed_position[0];
     double robot_vel_y =
         local_goal.get<1>() - transform_result.transformed_position[1];
 
-    auto jacobian =
-        Eigen::Matrix2d(transform_result.transformed_jacobian[0][0],
-                        transform_result.transformed_jacobian[0][1],
-                        transform_result.transformed_jacobian[1][0],
-                        transform_result.transformed_jacobian[1][1]);
+    Eigen::Matrix2d jacobian;
+    jacobian << transform_result.transformed_jacobian[0][0],
+                transform_result.transformed_jacobian[0][1],
+                transform_result.transformed_jacobian[1][0],
+                transform_result.transformed_jacobian[1][1];
     // Compute the inverse Jacobian
-    Eigen::Matrix2d jacobian_inv =
-        jacobian.completeOrthogonalDecomposition().pseudoInverse();
+    Eigen::Matrix2d jacobian_inv = jacobian.inverse();
 
     auto transformed_velocity =
         jacobian_inv * Eigen::Vector2d(robot_vel_x, robot_vel_y);
+        
 
     // Check if robot is within goal tolerance of subgoal
     double distance_to_subgoal =
@@ -653,19 +667,37 @@ private:
       //
       // use only linear command limit for now
       //
-      cmd_vel.linear.x = std::max(
-          -linear_cmd_limit_,
-          std::min(transformed_velocity[0] * linear_gain_, linear_cmd_limit_));
-      cmd_vel.linear.y = std::max(
-          -linear_cmd_limit_,
-          std::min(transformed_velocity[1] * linear_gain_, linear_cmd_limit_));
+      // Calculate the desired velocity vector
+      double desired_vel_x = transformed_velocity[0] * linear_gain_;
+      double desired_vel_y = transformed_velocity[1] * linear_gain_;
+      
+      // Calculate the magnitude of the desired velocity
+      double desired_vel_magnitude = std::sqrt(desired_vel_x * desired_vel_x + desired_vel_y * desired_vel_y);
+      
+      // Normalize to linear command limit if necessary
+      if (desired_vel_magnitude > linear_cmd_limit_) {
+        double scale_factor = linear_cmd_limit_ / desired_vel_magnitude;
+        cmd_vel.linear.x = desired_vel_x * scale_factor;
+        cmd_vel.linear.y = desired_vel_y * scale_factor;
+        RCLCPP_INFO(this->get_logger(),
+                    "Velocity vector normalized: desired_mag=%.3f, limited_mag=%.3f, scale=%.3f",
+                    desired_vel_magnitude, linear_cmd_limit_, scale_factor);
+      } else {
+        cmd_vel.linear.x = desired_vel_x;
+        cmd_vel.linear.y = desired_vel_y;
+      }
+      
+      RCLCPP_INFO(this->get_logger(),
+                  "Velocity vector: x=%.3f, y=%.3f, magnitude=%.3f",
+                  cmd_vel.linear.x, cmd_vel.linear.y, 
+                  std::sqrt(cmd_vel.linear.x * cmd_vel.linear.x + cmd_vel.linear.y * cmd_vel.linear.y));
     }
 
     cmd_vel_pub_->publish(cmd_vel);
 
     RCLCPP_INFO(this->get_logger(),
                 "Published cmd_vel: linear.x=%.3f, angular.z=%.3f",
-                cmd_vel.linear.x, cmd_vel.angular.z);
+                cmd_vel.linear.x, cmd_vel.linear.zy);
   }
 
   polygon compute_local_workspace_polygon(
@@ -991,6 +1023,38 @@ private:
     }
 
     clipped_polygon_markers_pub_->publish(marker_array);
+  }
+
+  void publish_local_goal_marker(const point &local_goal) {
+    auto marker = visualization_msgs::msg::Marker();
+    marker.header.frame_id = "map";
+    marker.header.stamp = this->get_clock()->now();
+    marker.ns = "local_goal";
+    marker.id = 0;
+    marker.type = visualization_msgs::msg::Marker::SPHERE;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+
+    // Set position
+    marker.pose.position.x = local_goal.get<0>();
+    marker.pose.position.y = local_goal.get<1>();
+    marker.pose.position.z = 0.1; // Slightly elevated for visibility
+    marker.pose.orientation.w = 1.0;
+
+    // Set scale (sphere radius)
+    marker.scale.x = 0.3;
+    marker.scale.y = 0.3;
+    marker.scale.z = 0.3;
+
+    // Set color (bright yellow)
+    marker.color.r = 1.0;
+    marker.color.g = 1.0;
+    marker.color.b = 0.0;
+    marker.color.a = 1.0;
+
+    // Set lifetime (marker persists until updated)
+    marker.lifetime = rclcpp::Duration::from_nanoseconds(0);
+
+    local_goal_marker_pub_->publish(marker);
   }
 };
 
