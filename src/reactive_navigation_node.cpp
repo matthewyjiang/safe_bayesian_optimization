@@ -152,7 +152,7 @@ public:
 
     // Create timer for control loop
     control_timer_ = this->create_wall_timer(
-        std::chrono::milliseconds(500),
+        std::chrono::milliseconds(100),
         std::bind(&ReactiveNavigationNode::control_callback, this));
 
     RCLCPP_INFO(this->get_logger(), "Reactive Navigation Node initialized");
@@ -483,6 +483,10 @@ private:
     std::vector<double> robot_position = {current_position_.x,
                                           current_position_.y};
 
+
+    // print the size of the diffeo tree array
+    RCLCPP_INFO(this->get_logger(), "Diffeo tree array size: %zu", diffeo_tree_array_.size());
+
     DiffeoTransformResult transform_result = computeDiffeoTransform(
         robot_position, current_yaw_, diffeo_tree_array_, diffeo_params_);
 
@@ -642,13 +646,40 @@ private:
                 transform_result.transformed_jacobian[0][1],
                 transform_result.transformed_jacobian[1][0],
                 transform_result.transformed_jacobian[1][1];
+    
+    // Pretty print the Jacobian matrix
+    RCLCPP_INFO(this->get_logger(),
+                "Jacobian matrix:\n"
+                "  [%8.4f  %8.4f]\n"
+                "  [%8.4f  %8.4f]",
+                jacobian(0,0), jacobian(0,1),
+                jacobian(1,0), jacobian(1,1));
+    
     // Compute the inverse Jacobian
     Eigen::Matrix2d jacobian_inv = jacobian.inverse();
+    
+    // Pretty print the inverse Jacobian matrix
+    RCLCPP_INFO(this->get_logger(),
+                "Inverse Jacobian matrix:\n"
+                "  [%8.4f  %8.4f]\n"
+                "  [%8.4f  %8.4f]",
+                jacobian_inv(0,0), jacobian_inv(0,1),
+                jacobian_inv(1,0), jacobian_inv(1,1));
+    
+    // Calculate determinant for additional debugging
+    double det = jacobian.determinant();
+    RCLCPP_INFO(this->get_logger(), "Jacobian determinant: %.6f", det);
+    
+    if (std::abs(det) < 1e-6) {
+        RCLCPP_WARN(this->get_logger(), "WARNING: Jacobian is near-singular (det=%.6f)!", det);
+    }
 
-    // auto transformed_velocity =
-    //     jacobian_inv * Eigen::Vector2d(robot_vel_x, robot_vel_y);
-
-    auto transformed_velocity = Eigen::Vector2d(robot_vel_x, robot_vel_y);
+    // Transform velocity back to original coordinate space using inverse Jacobian
+    auto transformed_velocity = jacobian_inv * Eigen::Vector2d(robot_vel_x, robot_vel_y);
+    
+    RCLCPP_INFO(this->get_logger(),
+                "Velocity transformation: original=(%.3f,%.3f), transformed=(%.3f,%.3f)",
+                robot_vel_x, robot_vel_y, transformed_velocity[0], transformed_velocity[1]);
         
 
     // Check if robot is within goal tolerance of subgoal
