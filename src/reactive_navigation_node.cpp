@@ -523,6 +523,7 @@ private:
     polygon local_workspace_polygon = compute_local_workspace_polygon(
         transform_result.transformed_position, model_obstacle_centers,
         model_obstacle_radii);
+    RCLCPP_INFO(this->get_logger(), "transformed_position=(%.3f, %.3f)", transform_result.transformed_position[0], transform_result.transformed_position[1]);
 
     polygon local_free_space_polygon;
     if (local_workspace_polygon.outer().size() < 3) {
@@ -636,10 +637,13 @@ private:
     // Publish local goal marker for visualization
     publish_local_goal_marker(local_goal);
 
-    double robot_vel_x =
-        local_goal.get<0>() - transform_result.transformed_position[0];
-    double robot_vel_y =
-        local_goal.get<1>() - transform_result.transformed_position[1];
+    // double robot_vel_x =
+    //     local_goal.get<0>() - transform_result.transformed_position[0];
+    // double robot_vel_y =
+    //     local_goal.get<1>() - transform_result.transformed_position[1];
+
+    double robot_vel_x = local_goal.get<0>() - current_position_.x;
+    double robot_vel_y = local_goal.get<1>() - current_position_.y;
 
     Eigen::Matrix2d jacobian;
     jacobian << transform_result.transformed_jacobian[0][0],
@@ -677,9 +681,15 @@ private:
     // Transform velocity back to original coordinate space using inverse Jacobian
     auto transformed_velocity = jacobian_inv * Eigen::Vector2d(robot_vel_x, robot_vel_y);
     
+
     RCLCPP_INFO(this->get_logger(),
-                "Velocity transformation: original=(%.3f,%.3f), transformed=(%.3f,%.3f)",
-                robot_vel_x, robot_vel_y, transformed_velocity[0], transformed_velocity[1]);
+                "Velocity transformation: original=(%.3f,%.3f), transformed=(%.3f,%.3f), local_goal=(%.3f,%.3f), distance_to_subgoal=(%.3f, %.3f), current_position=(%.3f, %.3f)",
+                robot_vel_x, robot_vel_y, transformed_velocity[0], transformed_velocity[1],
+                local_goal.get<0>(), local_goal.get<1>(),
+                sqrt(pow(local_goal.get<0>() - transform_result.transformed_position[0], 2)),
+                sqrt(pow(local_goal.get<1>() - transform_result.transformed_position[1], 2)),
+                transform_result.transformed_position[0],
+                transform_result.transformed_position[1]);
         
 
     // Check if robot is within goal tolerance of subgoal
@@ -712,7 +722,8 @@ private:
       // Calculate the desired velocity vector
       double desired_vel_x = transformed_velocity[0] * linear_gain_;
       double desired_vel_y = transformed_velocity[1] * linear_gain_;
-      
+      // double desired_vel_x = robot_vel_x * linear_gain_;
+      // double desired_vel_y = robot_vel_y * linear_gain_;
       // Calculate the magnitude of the desired velocity
       double desired_vel_magnitude = std::sqrt(desired_vel_x * desired_vel_x + desired_vel_y * desired_vel_y);
       
