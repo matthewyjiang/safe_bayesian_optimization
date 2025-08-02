@@ -32,10 +32,10 @@ public:
         tf_listener_(tf_buffer_) {
     // Declare reactive planner parameters
     this->declare_parameter("reactive_planner.p", 2.0);
-    this->declare_parameter("reactive_planner.epsilon", 0.1);
+    this->declare_parameter("reactive_planner.epsilon", 20.0);
     this->declare_parameter("reactive_planner.varepsilon", 0.05);
     this->declare_parameter("reactive_planner.mu_1", 1.0);
-    this->declare_parameter("reactive_planner.mu_2", 1.0);
+    this->declare_parameter("reactive_planner.mu_2", 0.15);
     this->declare_parameter("reactive_planner.robot_radius", 0.3);
     this->declare_parameter("reactive_planner.linear_gain", 1.0);
     this->declare_parameter("reactive_planner.angular_gain", 1.0);
