@@ -367,25 +367,12 @@ void diffeoTreeConvex(std::vector<std::vector<double>> PolygonVertices, DiffeoPa
      * 
      */
 
-    std::cout << "\n=== DEBUG: diffeoTreeConvex STARTED ===" << std::endl;
-    
     // Create a dummy origin
     point origin(0.0, 0.0);
 
     // Unpack diffeomorphism parameters
     double varepsilon = DiffeoParams.get_varepsilon();
     std::vector<std::vector<double>> workspace = DiffeoParams.get_workspace();
-    
-    std::cout << "DEBUG: Input Parameters:" << std::endl;
-    std::cout << "  varepsilon: " << varepsilon << std::endl;
-    std::cout << "  PolygonVertices size: " << PolygonVertices.size() << std::endl;
-    for (size_t i = 0; i < PolygonVertices.size(); i++) {
-        std::cout << "    Vertex " << i << ": (" << PolygonVertices[i][0] << ", " << PolygonVertices[i][1] << ")" << std::endl;
-    }
-    std::cout << "  Workspace vertices:" << std::endl;
-    for (size_t i = 0; i < workspace.size(); i++) {
-        std::cout << "    Workspace " << i << ": (" << workspace[i][0] << ", " << workspace[i][1] << ")" << std::endl;
-    }
 
     // Construct a polygon based on the input vertices
     polygon PolygonIn = BoostPointToBoostPoly(StdToBoostPoint(PolygonVertices));
@@ -394,65 +381,32 @@ void diffeoTreeConvex(std::vector<std::vector<double>> PolygonVertices, DiffeoPa
     line workspaceLine = BoostPointToBoostLine(StdToBoostPoint(workspace));
     polygon workspacePolygon = BoostPointToBoostPoly(StdToBoostPoint(workspace));
 
-    std::cout << "\nDEBUG: Geometry Construction Complete" << std::endl;
-    std::cout << "  PolygonIn area: " << bg::area(PolygonIn) << std::endl;
-    std::cout << "  WorkspacePolygon area: " << bg::area(workspacePolygon) << std::endl;
-
     // Check if the polygon intersects the workspace boundary
-    bool intersects_workspace = bg::intersects(PolygonIn, workspaceLine);
-    std::cout << "\nDEBUG: Workspace Intersection Check" << std::endl;
-    std::cout << "  Polygon intersects workspace boundary: " << (intersects_workspace ? "YES" : "NO") << std::endl;
-    
-    if (intersects_workspace) {
-        std::cout << "\n--- DEBUG: INTERSECTION CASE (polygon intersects workspace) ---" << std::endl;
-        
+    if (bg::intersects(PolygonIn, workspaceLine)) {
         // Compute the intersection with the workspace
         multi_polygon polygon_to_use;
         bg::intersection(PolygonIn, workspacePolygon, polygon_to_use);
-        std::cout << "  Intersection computed, multipolygon size: " << polygon_to_use.size() << std::endl;
-        if (!polygon_to_use.empty()) {
-            std::cout << "  First polygon area: " << bg::area(polygon_to_use[0]) << std::endl;
-        }
 
         // Find the vertices of the polygon
         std::vector<std::vector<double>> PolygonVertexList = BoostPointToStd(BoostPolyToBoostPoint(polygon_to_use[0]));
-        std::cout << "  PolygonVertexList size: " << PolygonVertexList.size() << std::endl;
-        for (size_t i = 0; i < PolygonVertexList.size(); i++) {
-            std::cout << "    Intersected vertex " << i << ": (" << PolygonVertexList[i][0] << ", " << PolygonVertexList[i][1] << ")" << std::endl;
-        }
 
         // Compute the convex decomposition tree of the polygon with its dual (adjacency) graph
-        std::cout << "  Calling polyconvexdecomposition with boundary=true..." << std::endl;
         polyconvexdecomposition(PolygonVertexList, workspace, true, tree);
-        std::cout << "  Tree size after decomposition: " << tree->size() << std::endl;
 
         // Find the adjacency edge to the boundary
         std::vector<point> last_polygon_vertices = tree->back().get_vertices();
-        std::cout << "\n  DEBUG: Finding adjacency edge to boundary" << std::endl;
-        std::cout << "    Last polygon vertices count: " << last_polygon_vertices.size() << std::endl;
-        
         std::vector<double> dist_vector(last_polygon_vertices.size(), 0.0);
         for (size_t i = 0; i < last_polygon_vertices.size(); i++) {
             dist_vector[i] = bg::distance(last_polygon_vertices[i], workspaceLine);
-            std::cout << "    Distance from vertex " << i << " to workspace line: " << dist_vector[i] << std::endl;
         }
         int min_dist_element = std::distance(dist_vector.begin(), std::min_element(dist_vector.begin(), dist_vector.end()));
-        std::cout << "    Minimum distance element index: " << min_dist_element << std::endl;
-        
         std::vector<point> new_root_vertices;
         int last_polygon_vertices_size = static_cast<int>(last_polygon_vertices.size());
-        
-        double next_dist = dist_vector[(min_dist_element+1)%last_polygon_vertices_size];
-        double prev_dist = dist_vector[(last_polygon_vertices_size+((min_dist_element-1)%last_polygon_vertices_size))%last_polygon_vertices_size];
-        std::cout << "    Next vertex distance: " << next_dist << ", Previous vertex distance: " << prev_dist << std::endl;
-        
-        if (next_dist >= prev_dist) {
-            std::cout << "    Using previous vertex ordering" << std::endl;
+        if (dist_vector[(min_dist_element+1)%last_polygon_vertices_size] >= dist_vector[(last_polygon_vertices_size+((min_dist_element-1)%last_polygon_vertices_size))%last_polygon_vertices_size]) {
             for (int j = 0; j < last_polygon_vertices_size; j++) {
                 new_root_vertices.push_back(point(last_polygon_vertices[(last_polygon_vertices_size+((min_dist_element-1+j)%last_polygon_vertices_size))%last_polygon_vertices_size].get<0>(), last_polygon_vertices[(last_polygon_vertices_size+((min_dist_element-1+j)%last_polygon_vertices_size))%last_polygon_vertices_size].get<1>()));
             }
         } else {
-            std::cout << "    Using next vertex ordering" << std::endl;
             for (int j = 0; j < last_polygon_vertices.size(); j++) {
                 new_root_vertices.push_back(point(last_polygon_vertices[(min_dist_element+j)%last_polygon_vertices.size()].get<0>(), last_polygon_vertices[(min_dist_element+j)%last_polygon_vertices.size()].get<1>()));
             }
@@ -461,57 +415,13 @@ void diffeoTreeConvex(std::vector<std::vector<double>> PolygonVertices, DiffeoPa
         last_polygon_vertices = tree->back().get_vertices();
         std::vector<point> last_polygon_adj_edge = {last_polygon_vertices[0], last_polygon_vertices[1]};
         tree->back().set_adj_edge(last_polygon_adj_edge);
-        std::cout << "    Adjacency edge: (" << last_polygon_adj_edge[0].get<0>() << "," << last_polygon_adj_edge[0].get<1>() << ") to (" << last_polygon_adj_edge[1].get<0>() << "," << last_polygon_adj_edge[1].get<1>() << ")" << std::endl;
 
         // Find the center of transformation
-        std::cout << "\n  DEBUG: Computing center of transformation" << std::endl;
         point median_point(0.5*(last_polygon_vertices[1].get<0>()+last_polygon_vertices[0].get<0>()), 0.5*(last_polygon_vertices[1].get<1>()+last_polygon_vertices[0].get<1>()));
-        std::cout << "    Median point: (" << median_point.get<0>() << ", " << median_point.get<1>() << ")" << std::endl;
-        
-        // Calculate perpendicular vector (two possible directions)
-        point median_ray_candidate(-(last_polygon_adj_edge[0].get<1>()-last_polygon_adj_edge[1].get<1>()), last_polygon_adj_edge[0].get<0>()-last_polygon_adj_edge[1].get<0>());
-        double ray_distance = bg::distance(median_ray_candidate,origin);
-        std::cout << "    Median ray candidate before normalization: (" << median_ray_candidate.get<0>() << ", " << median_ray_candidate.get<1>() << "), distance: " << ray_distance << std::endl;
-        
-        // Normalize the candidate ray
-        point median_ray_norm(median_ray_candidate.get<0>()/ray_distance, median_ray_candidate.get<1>()/ray_distance);
-        
-        // // Test both directions to see which one points inward (toward polygon interior)
-        // point test_point_1(median_point.get<0>() + 0.01*median_ray_norm.get<0>(), median_point.get<1>() + 0.01*median_ray_norm.get<1>());
-        // point test_point_2(median_point.get<0>() - 0.01*median_ray_norm.get<0>(), median_point.get<1>() - 0.01*median_ray_norm.get<1>());
-        
-        // // Create polygon for testing containment
-        // std::vector<point> test_polygon_vertices = last_polygon_vertices;
-        // test_polygon_vertices.push_back(last_polygon_vertices[0]); // Close the polygon
-        // polygon test_polygon = BoostPointToBoostPoly(test_polygon_vertices);
-        
-        // // Check which test point is inside the polygon
-        // bool point1_inside = bg::within(test_point_1, test_polygon);
-        // bool point2_inside = bg::within(test_point_2, test_polygon);
-        
-        // std::cout << "    Test point 1: (" << test_point_1.get<0>() << ", " << test_point_1.get<1>() << ") inside: " << point1_inside << std::endl;
-        // std::cout << "    Test point 2: (" << test_point_2.get<0>() << ", " << test_point_2.get<1>() << ") inside: " << point2_inside << std::endl;
-        
-        // // Choose the correct inward direction
-        // point median_ray;
-        // if (point1_inside && !point2_inside) {
-        //     median_ray = median_ray_norm;
-        //     std::cout << "    Using original direction (inward)" << std::endl;
-        // } else if (!point1_inside && point2_inside) {
-        //     median_ray = point(-median_ray_norm.get<0>(), -median_ray_norm.get<1>());
-        //     std::cout << "    Using reversed direction (inward)" << std::endl;
-        // } else {
-        //     // Fallback: use original direction but log warning
-        //     median_ray = median_ray_norm;
-        //     std::cout << "    WARNING: Could not determine inward direction, using original" << std::endl;
-        // }
-
-        median_ray = median_ray_norm;
-        
-        std::cout << "    Final median ray (inward): (" << median_ray.get<0>() << ", " << median_ray.get<1>() << ")" << std::endl;
-        
+        point median_ray(-(last_polygon_adj_edge[0].get<1>()-last_polygon_adj_edge[1].get<1>()), last_polygon_adj_edge[0].get<0>()-last_polygon_adj_edge[1].get<0>());
+        median_ray.set<0>(median_ray.get<0>()/bg::distance(median_ray,origin));
+        median_ray.set<1>(median_ray.get<1>()/bg::distance(median_ray,origin));
         point last_polygon_center(median_point.get<0>()+0.1*median_ray.get<0>(), median_point.get<1>()+0.1*median_ray.get<1>());
-        std::cout << "    Final center: (" << last_polygon_center.get<0>() << ", " << last_polygon_center.get<1>() << ")" << std::endl;
         tree->back().set_center(last_polygon_center);
 
         // Find the tangent and normal vectors for the generated polygon
@@ -578,20 +488,11 @@ void diffeoTreeConvex(std::vector<std::vector<double>> PolygonVertices, DiffeoPa
         // Add a dummy radius
         tree->back().set_radius(0.0);
     } else {
-        std::cout << "\n--- DEBUG: NO INTERSECTION CASE (polygon doesn't intersect workspace) ---" << std::endl;
-        
         // Compute the convex decomposition tree of the polygon with its dual (adjacency) graph
-        std::cout << "  Calling polyconvexdecomposition with boundary=false..." << std::endl;
         polyconvexdecomposition(PolygonVertices, workspace, false, tree);
-        std::cout << "  Tree size after decomposition: " << tree->size() << std::endl;
 
         // Find the center of the root
         std::vector<point> last_polygon_vertices = tree->back().get_vertices();
-        std::cout << "  Root polygon vertices count: " << last_polygon_vertices.size() << std::endl;
-        for (size_t i = 0; i < last_polygon_vertices.size(); i++) {
-            std::cout << "    Root vertex " << i << ": (" << last_polygon_vertices[i].get<0>() << ", " << last_polygon_vertices[i].get<1>() << ")" << std::endl;
-        }
-        
         tree->back().set_augmented_vertices(last_polygon_vertices);
         double sum_x = 0.0, sum_y = 0.0;
         for (size_t i = 0; i < last_polygon_vertices.size(); i++) {
@@ -599,17 +500,12 @@ void diffeoTreeConvex(std::vector<std::vector<double>> PolygonVertices, DiffeoPa
             sum_y = sum_y + last_polygon_vertices[i].get<1>();
         }
 	    double polygon_vertex_size = (double)last_polygon_vertices.size();
-        point centroid(sum_x/polygon_vertex_size, sum_y/polygon_vertex_size);
-        std::cout << "  Computed centroid: (" << centroid.get<0>() << ", " << centroid.get<1>() << ")" << std::endl;
-        tree->back().set_center(centroid);
+        tree->back().set_center(point(sum_x/polygon_vertex_size, sum_y/polygon_vertex_size));
 
         // Find the radius of the root
         std::vector<point> polygon_to_consider = last_polygon_vertices;
         polygon_to_consider.push_back(last_polygon_vertices[0]);
-        double distance_to_boundary = bg::distance(tree->back().get_center(), BoostPointToBoostLine(polygon_to_consider));
-        double radius = 0.8 * distance_to_boundary;
-        std::cout << "  Distance to boundary: " << distance_to_boundary << ", Radius: " << radius << std::endl;
-        tree->back().set_radius(radius);
+        tree->back().set_radius(0.8*bg::distance(tree->back().get_center(), BoostPointToBoostLine(polygon_to_consider)));
 
         // Compute the tangent and normal vectors of the root polygon
         std::vector<point> r_t_vector, r_n_vector;
@@ -651,29 +547,16 @@ void diffeoTreeConvex(std::vector<std::vector<double>> PolygonVertices, DiffeoPa
     }
 
     // Identify all the children properties
-    std::cout << "\n=== DEBUG: PROCESSING CHILDREN PROPERTIES ===" << std::endl;
-    std::cout << "Total children to process: " << (tree->size()-1) << std::endl;
-    
     for (size_t i = 0; i < tree->size()-1; i++) {
-        std::cout << "\n--- DEBUG: Processing child " << i << " ---" << std::endl;
-        
         // Compute the tangent and normal vectors of the child hyperplanes
         // r0 is always the shared edge between the parent and the child, r1 and r2 the rest in CCW order
         std::vector<point> polygon_vertices = (*tree)[i].get_vertices();
-        std::cout << "  Child " << i << " vertices count: " << polygon_vertices.size() << std::endl;
-        for (size_t v = 0; v < polygon_vertices.size(); v++) {
-            std::cout << "    Child vertex " << v << ": (" << polygon_vertices[v].get<0>() << ", " << polygon_vertices[v].get<1>() << ")" << std::endl;
-        }
-        
         std::vector<point> r_t_vector, r_n_vector;
         for (size_t k = 0; k < polygon_vertices.size(); k++) {
             size_t j = (k+1)%(polygon_vertices.size());
             double dist_jk = bg::distance(polygon_vertices[k],polygon_vertices[j]);
-            point tangent((polygon_vertices[j].get<0>()-polygon_vertices[k].get<0>())/dist_jk, (polygon_vertices[j].get<1>()-polygon_vertices[k].get<1>())/dist_jk);
-            point normal(-(polygon_vertices[j].get<1>()-polygon_vertices[k].get<1>())/dist_jk, (polygon_vertices[j].get<0>()-polygon_vertices[k].get<0>())/dist_jk);
-            r_t_vector.push_back(tangent);
-            r_n_vector.push_back(normal);
-            std::cout << "    Edge " << k << " to " << j << ": tangent(" << tangent.get<0>() << "," << tangent.get<1>() << "), normal(" << normal.get<0>() << "," << normal.get<1>() << ")" << std::endl;
+            r_t_vector.push_back(point((polygon_vertices[j].get<0>()-polygon_vertices[k].get<0>())/dist_jk, (polygon_vertices[j].get<1>()-polygon_vertices[k].get<1>())/dist_jk));
+            r_n_vector.push_back(point(-(polygon_vertices[j].get<1>()-polygon_vertices[k].get<1>())/dist_jk, (polygon_vertices[j].get<0>()-polygon_vertices[k].get<0>())/dist_jk));
         }
         (*tree)[i].set_r_t(r_t_vector);
         (*tree)[i].set_r_n(r_n_vector);
@@ -833,13 +716,7 @@ void diffeoTreeConvex(std::vector<std::vector<double>> PolygonVertices, DiffeoPa
         (*tree)[i].set_augmented_vertices(polygon_vertices);
         (*tree)[i].set_r_t(r_t_vector);
         (*tree)[i].set_r_n(r_n_vector);
-        
-        std::cout << "  Child " << i << " processing complete" << std::endl;
     }
-
-    std::cout << "\n=== DEBUG: diffeoTreeConvex COMPLETED ===" << std::endl;
-    std::cout << "Final tree size: " << tree->size() << std::endl;
-    std::cout << "All polygon properties computed successfully" << std::endl;
 
     return;
 }
@@ -916,124 +793,28 @@ OutputStructVector polygonDiffeoConvex(std::vector<double> Position, std::vector
      *  1) Output: Output struct containing the value, jacobian and derivatives of the jacobian
      */
 
-    std::cout << "\n=== DEBUG: polygonDiffeoConvex STARTED ===" << std::endl;
-    std::cout << "Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-    std::cout << "DiffeoTree size: " << DiffeoTree.size() << " convex pieces" << std::endl;
-
     // Begin purging process with default values
     OutputStructVector Output;
     std::vector<double> map_h = Position;
     std::vector<std::vector<double>> map_hd = {{1.0, 0.0}, {0.0, 1.0}};
     std::vector<double> map_hdd = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
-    std::cout << "\nInitial transformation state:" << std::endl;
-    std::cout << "  map_h (position): [" << map_h[0] << ", " << map_h[1] << "]" << std::endl;
-    std::cout << "  map_hd (jacobian): [[" << map_hd[0][0] << ", " << map_hd[0][1] << "], [" << map_hd[1][0] << ", " << map_hd[1][1] << "]]" << std::endl;
-    std::cout << "  map_hdd (hessian): [" << map_hdd[0] << ", " << map_hdd[1] << ", " << map_hdd[2] << ", " << map_hdd[3] << ", " << map_hdd[4] << ", " << map_hdd[5] << ", " << map_hdd[6] << ", " << map_hdd[7] << "]" << std::endl;
-
     // Iterate through the polygon triangles
     for (size_t i = 0; i < DiffeoTree.size(); i++) {
-        std::cout << "\n--- DEBUG: Processing convex piece " << i << " ---" << std::endl;
-        
-        // Print polygon info
-        std::vector<point> vertices = DiffeoTree[i].get_vertices();
-        std::cout << "  Polygon " << i << " vertices (" << vertices.size() << " total):" << std::endl;
-        for (size_t v = 0; v < vertices.size(); v++) {
-            std::cout << "    Vertex " << v << ": (" << vertices[v].get<0>() << ", " << vertices[v].get<1>() << ")" << std::endl;
-        }
-        point center = DiffeoTree[i].get_center();
-        std::cout << "  Polygon " << i << " center: (" << center.get<0>() << ", " << center.get<1>() << ")" << std::endl;
-        
-        std::cout << "  Input to polygonDiffeo:" << std::endl;
-        std::cout << "    Position: [" << map_h[0] << ", " << map_h[1] << "]" << std::endl;
         OutputStructVector OutputNew = polygonDiffeo(map_h, DiffeoTree[i], DiffeoParams);
 
         std::vector<double> map_h_new = OutputNew.Value;
         std::vector<std::vector<double>> map_hd_new = OutputNew.Jacobian;
         std::vector<double> map_hdd_new = OutputNew.JacobianD;
 
-        std::cout << "  Output from polygonDiffeo:" << std::endl;
-        std::cout << "    map_h_new (transformed position): [" << map_h_new[0] << ", " << map_h_new[1] << "]" << std::endl;
-        std::cout << "    map_hd_new (new jacobian): [[" << map_hd_new[0][0] << ", " << map_hd_new[0][1] << "], [" << map_hd_new[1][0] << ", " << map_hd_new[1][1] << "]]" << std::endl;
-        std::cout << "    map_hdd_new (new hessian): [" << map_hdd_new[0] << ", " << map_hdd_new[1] << ", " << map_hdd_new[2] << ", " << map_hdd_new[3] << ", " << map_hdd_new[4] << ", " << map_hdd_new[5] << ", " << map_hdd_new[6] << ", " << map_hdd_new[7] << "]" << std::endl;
-        
-        std::cout << "  Computing chain rule for hessian composition..." << std::endl;
-        std::cout << "  Current cumulative state:" << std::endl;
-        std::cout << "    map_hd (old jacobian): [[" << map_hd[0][0] << ", " << map_hd[0][1] << "], [" << map_hd[1][0] << ", " << map_hd[1][1] << "]]" << std::endl;
-        std::cout << "    map_hdd (old hessian): [" << map_hdd[0] << ", " << map_hdd[1] << ", " << map_hdd[2] << ", " << map_hdd[3] << ", " << map_hdd[4] << ", " << map_hdd[5] << ", " << map_hdd[6] << ", " << map_hdd[7] << "]" << std::endl;
-
-        // Chain rule formula: d²(f∘g)/dx² = (d²f/dy²)⋅(dg/dx)² + (df/dy)⋅(d²g/dx²)
-        // For 2D: Each res computes one component of the composed hessian tensor
-        
-        std::cout << "  Chain rule calculation breakdown:" << std::endl;
-        
-        // res1: ∂²h₁/∂x₁² component
-        double term1_res1 = map_hd_new[0][0]*map_hdd[0];
-        double term2_res1 = map_hd_new[0][1]*map_hdd[4];
-        double term3_res1 = map_hd[0][0]*(map_hdd_new[0]*map_hd[0][0] + map_hdd_new[1]*map_hd[1][0]);
-        double term4_res1 = map_hd[1][0]*(map_hdd_new[2]*map_hd[0][0] + map_hdd_new[3]*map_hd[1][0]);
-        double res1 = term1_res1 + term2_res1 + term3_res1 + term4_res1;
-        std::cout << "    res1 (∂²h₁/∂x₁²): " << term1_res1 << " + " << term2_res1 << " + " << term3_res1 << " + " << term4_res1 << " = " << res1 << std::endl;
-        
-        // res2: ∂²h₁/∂x₁∂x₂ component  
-        double term1_res2 = map_hd_new[0][0]*map_hdd[1];
-        double term2_res2 = map_hd_new[0][1]*map_hdd[5];
-        double term3_res2 = map_hd[0][0]*(map_hdd_new[0]*map_hd[0][1] + map_hdd_new[1]*map_hd[1][1]);
-        double term4_res2 = map_hd[1][0]*(map_hdd_new[2]*map_hd[0][1] + map_hdd_new[3]*map_hd[1][1]);
-        double res2 = term1_res2 + term2_res2 + term3_res2 + term4_res2;
-        std::cout << "    res2 (∂²h₁/∂x₁∂x₂): " << term1_res2 << " + " << term2_res2 << " + " << term3_res2 << " + " << term4_res2 << " = " << res2 << std::endl;
-
-        // res3: ∂²h₁/∂x₂∂x₁ component (should equal res2 for symmetric hessian)
-        double term1_res3 = map_hd_new[0][0]*map_hdd[2];
-        double term2_res3 = map_hd_new[0][1]*map_hdd[6];
-        double term3_res3 = map_hd[0][1]*(map_hdd_new[0]*map_hd[0][0] + map_hdd_new[1]*map_hd[1][0]);
-        double term4_res3 = map_hd[1][1]*(map_hdd_new[2]*map_hd[0][0] + map_hdd_new[3]*map_hd[1][0]);
-        double res3 = term1_res3 + term2_res3 + term3_res3 + term4_res3;
-        std::cout << "    res3 (∂²h₁/∂x₂∂x₁): " << term1_res3 << " + " << term2_res3 << " + " << term3_res3 << " + " << term4_res3 << " = " << res3 << std::endl;
-
-        // res4: ∂²h₁/∂x₂² component
-        double term1_res4 = map_hd_new[0][0]*map_hdd[3];
-        double term2_res4 = map_hd_new[0][1]*map_hdd[7];
-        double term3_res4 = map_hd[0][1]*(map_hdd_new[0]*map_hd[0][1] + map_hdd_new[1]*map_hd[1][1]);
-        double term4_res4 = map_hd[1][1]*(map_hdd_new[2]*map_hd[0][1] + map_hdd_new[3]*map_hd[1][1]);
-        double res4 = term1_res4 + term2_res4 + term3_res4 + term4_res4;
-        std::cout << "    res4 (∂²h₁/∂x₂²): " << term1_res4 << " + " << term2_res4 << " + " << term3_res4 << " + " << term4_res4 << " = " << res4 << std::endl;
-        
-        // res5: ∂²h₂/∂x₁² component
-        double term1_res5 = map_hd_new[1][0]*map_hdd[0];
-        double term2_res5 = map_hd_new[1][1]*map_hdd[4];
-        double term3_res5 = map_hd[0][0]*(map_hdd_new[4]*map_hd[0][0] + map_hdd_new[5]*map_hd[1][0]);
-        double term4_res5 = map_hd[1][0]*(map_hdd_new[6]*map_hd[0][0] + map_hdd_new[7]*map_hd[1][0]);
-        double res5 = term1_res5 + term2_res5 + term3_res5 + term4_res5;
-        std::cout << "    res5 (∂²h₂/∂x₁²): " << term1_res5 << " + " << term2_res5 << " + " << term3_res5 << " + " << term4_res5 << " = " << res5 << std::endl;
-
-        // res6: ∂²h₂/∂x₁∂x₂ component
-        double term1_res6 = map_hd_new[1][0]*map_hdd[1];
-        double term2_res6 = map_hd_new[1][1]*map_hdd[5];
-        double term3_res6 = map_hd[0][0]*(map_hdd_new[4]*map_hd[0][1] + map_hdd_new[5]*map_hd[1][1]);
-        double term4_res6 = map_hd[1][0]*(map_hdd_new[6]*map_hd[0][1] + map_hdd_new[7]*map_hd[1][1]);
-        double res6 = term1_res6 + term2_res6 + term3_res6 + term4_res6;
-        std::cout << "    res6 (∂²h₂/∂x₁∂x₂): " << term1_res6 << " + " << term2_res6 << " + " << term3_res6 << " + " << term4_res6 << " = " << res6 << std::endl;
-
-        // res7: ∂²h₂/∂x₂∂x₁ component (should equal res6 for symmetric hessian)
-        double term1_res7 = map_hd_new[1][0]*map_hdd[2];
-        double term2_res7 = map_hd_new[1][1]*map_hdd[6];
-        double term3_res7 = map_hd[0][1]*(map_hdd_new[4]*map_hd[0][0] + map_hdd_new[5]*map_hd[1][0]);
-        double term4_res7 = map_hd[1][1]*(map_hdd_new[6]*map_hd[0][0] + map_hdd_new[7]*map_hd[1][0]);
-        double res7 = term1_res7 + term2_res7 + term3_res7 + term4_res7;
-        std::cout << "    res7 (∂²h₂/∂x₂∂x₁): " << term1_res7 << " + " << term2_res7 << " + " << term3_res7 << " + " << term4_res7 << " = " << res7 << std::endl;
-
-        // res8: ∂²h₂/∂x₂² component
-        double term1_res8 = map_hd_new[1][0]*map_hdd[3];
-        double term2_res8 = map_hd_new[1][1]*map_hdd[7];
-        double term3_res8 = map_hd[0][1]*(map_hdd_new[4]*map_hd[0][1] + map_hdd_new[5]*map_hd[1][1]);
-        double term4_res8 = map_hd[1][1]*(map_hdd_new[6]*map_hd[0][1] + map_hdd_new[7]*map_hd[1][1]);
-        double res8 = term1_res8 + term2_res8 + term3_res8 + term4_res8;
-        std::cout << "    res8 (∂²h₂/∂x₂²): " << term1_res8 << " + " << term2_res8 << " + " << term3_res8 << " + " << term4_res8 << " = " << res8 << std::endl;
-        
-        std::cout << "  Updating hessian components:" << std::endl;
-        std::cout << "    map_hdd = [" << res1 << ", " << res2 << ", " << res3 << ", " << res4 << ", " << res5 << ", " << res6 << ", " << res7 << ", " << res8 << "]" << std::endl;
-        
+        double res1 = map_hd_new[0][0]*map_hdd[0] + map_hd_new[0][1]*map_hdd[4] + map_hd[0][0]*(map_hdd_new[0]*map_hd[0][0] + map_hdd_new[1]*map_hd[1][0]) + map_hd[1][0]*(map_hdd_new[2]*map_hd[0][0] + map_hdd_new[3]*map_hd[1][0]);
+        double res2 = map_hd_new[0][0]*map_hdd[1] + map_hd_new[0][1]*map_hdd[5] + map_hd[0][0]*(map_hdd_new[0]*map_hd[0][1] + map_hdd_new[1]*map_hd[1][1]) + map_hd[1][0]*(map_hdd_new[2]*map_hd[0][1] + map_hdd_new[3]*map_hd[1][1]);
+        double res3 = map_hd_new[0][0]*map_hdd[2] + map_hd_new[0][1]*map_hdd[6] + map_hd[0][1]*(map_hdd_new[0]*map_hd[0][0] + map_hdd_new[1]*map_hd[1][0]) + map_hd[1][1]*(map_hdd_new[2]*map_hd[0][0] + map_hdd_new[3]*map_hd[1][0]);
+        double res4 = map_hd_new[0][0]*map_hdd[3] + map_hd_new[0][1]*map_hdd[7] + map_hd[0][1]*(map_hdd_new[0]*map_hd[0][1] + map_hdd_new[1]*map_hd[1][1]) + map_hd[1][1]*(map_hdd_new[2]*map_hd[0][1] + map_hdd_new[3]*map_hd[1][1]);
+        double res5 = map_hd_new[1][0]*map_hdd[0] + map_hd_new[1][1]*map_hdd[4] + map_hd[0][0]*(map_hdd_new[4]*map_hd[0][0] + map_hdd_new[5]*map_hd[1][0]) + map_hd[1][0]*(map_hdd_new[6]*map_hd[0][0] + map_hdd_new[7]*map_hd[1][0]);
+        double res6 = map_hd_new[1][0]*map_hdd[1] + map_hd_new[1][1]*map_hdd[5] + map_hd[0][0]*(map_hdd_new[4]*map_hd[0][1] + map_hdd_new[5]*map_hd[1][1]) + map_hd[1][0]*(map_hdd_new[6]*map_hd[0][1] + map_hdd_new[7]*map_hd[1][1]);
+        double res7 = map_hd_new[1][0]*map_hdd[2] + map_hd_new[1][1]*map_hdd[6] + map_hd[0][1]*(map_hdd_new[4]*map_hd[0][0] + map_hdd_new[5]*map_hd[1][0]) + map_hd[1][1]*(map_hdd_new[6]*map_hd[0][0] + map_hdd_new[7]*map_hd[1][0]);
+        double res8 = map_hd_new[1][0]*map_hdd[3] + map_hd_new[1][1]*map_hdd[7] + map_hd[0][1]*(map_hdd_new[4]*map_hd[0][1] + map_hdd_new[5]*map_hd[1][1]) + map_hd[1][1]*(map_hdd_new[6]*map_hd[0][1] + map_hdd_new[7]*map_hd[1][1]);
         map_hdd[0] = res1;
         map_hdd[1] = res2;
         map_hdd[2] = res3;
@@ -1043,25 +824,7 @@ OutputStructVector polygonDiffeoConvex(std::vector<double> Position, std::vector
         map_hdd[6] = res7;
         map_hdd[7] = res8;
         
-        std::cout << "  Jacobian composition (chain rule for first derivatives):" << std::endl;
-        std::cout << "    Current jacobian (map_hd): [[" << map_hd[0][0] << ", " << map_hd[0][1] << "], [" << map_hd[1][0] << ", " << map_hd[1][1] << "]]" << std::endl;
-        std::cout << "    New layer jacobian (map_hd_new): [[" << map_hd_new[0][0] << ", " << map_hd_new[0][1] << "], [" << map_hd_new[1][0] << ", " << map_hd_new[1][1] << "]]" << std::endl;
-        
-        // Manual matrix multiplication to show intermediate terms
-        double new_j00 = map_hd_new[0][0]*map_hd[0][0] + map_hd_new[0][1]*map_hd[1][0];
-        double new_j01 = map_hd_new[0][0]*map_hd[0][1] + map_hd_new[0][1]*map_hd[1][1];
-        double new_j10 = map_hd_new[1][0]*map_hd[0][0] + map_hd_new[1][1]*map_hd[1][0];
-        double new_j11 = map_hd_new[1][0]*map_hd[0][1] + map_hd_new[1][1]*map_hd[1][1];
-        
-        std::cout << "    Matrix multiplication breakdown:" << std::endl;
-        std::cout << "      new_j[0][0] = " << map_hd_new[0][0] << "*" << map_hd[0][0] << " + " << map_hd_new[0][1] << "*" << map_hd[1][0] << " = " << new_j00 << std::endl;
-        std::cout << "      new_j[0][1] = " << map_hd_new[0][0] << "*" << map_hd[0][1] << " + " << map_hd_new[0][1] << "*" << map_hd[1][1] << " = " << new_j01 << std::endl;
-        std::cout << "      new_j[1][0] = " << map_hd_new[1][0] << "*" << map_hd[0][0] << " + " << map_hd_new[1][1] << "*" << map_hd[1][0] << " = " << new_j10 << std::endl;
-        std::cout << "      new_j[1][1] = " << map_hd_new[1][0] << "*" << map_hd[0][1] << " + " << map_hd_new[1][1] << "*" << map_hd[1][1] << " = " << new_j11 << std::endl;
-        
         map_hd = MatrixMatrixMultiplication(map_hd_new, map_hd);
-        
-        std::cout << "    Composed jacobian result: [[" << map_hd[0][0] << ", " << map_hd[0][1] << "], [" << map_hd[1][0] << ", " << map_hd[1][1] << "]]" << std::endl;
         
         map_h = map_h_new;
     }
@@ -1070,13 +833,6 @@ OutputStructVector polygonDiffeoConvex(std::vector<double> Position, std::vector
     Output.Value = map_h;
     Output.Jacobian = map_hd;
     Output.JacobianD = map_hdd;
-
-    std::cout << "\n=== DEBUG: polygonDiffeoConvex COMPLETED ===" << std::endl;
-    std::cout << "FINAL TRANSFORMATION SUMMARY:" << std::endl;
-    std::cout << "  Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-    std::cout << "  Final position: [" << map_h[0] << ", " << map_h[1] << "]" << std::endl;
-    std::cout << "  Total displacement: [" << (map_h[0] - Position[0]) << ", " << (map_h[1] - Position[1]) << "]" << std::endl;
-    std::cout << "  Final jacobian: [[" << map_hd[0][0] << ", " << map_hd[0][1] << "], [" << map_hd[1][0] << ", " << map_hd[1][1] << "]]" << std::endl;
 
     return Output;
 }
@@ -1153,138 +909,32 @@ OutputStructVector polygonDiffeo(std::vector<double> Position, PolygonClass Poly
      *  1) Output: Output struct containing the value, jacobian and derivatives of the jacobian
      */
 
-    std::cout << "\n    === DEBUG: polygonDiffeo STARTED ===" << std::endl;
-    std::cout << "      Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-    
-    // Print polygon info
-    std::vector<point> vertices = PolygonUsed.get_vertices();
-    std::cout << "      Polygon vertices (" << vertices.size() << " total):" << std::endl;
-    for (size_t v = 0; v < vertices.size(); v++) {
-        std::cout << "        Vertex " << v << ": (" << vertices[v].get<0>() << ", " << vertices[v].get<1>() << ")" << std::endl;
-    }
-    point center_point = PolygonUsed.get_center();
-    std::cout << "      Polygon center: (" << center_point.get<0>() << ", " << center_point.get<1>() << ")" << std::endl;
-
     // Compute the polygon switch and its gradient
-    std::cout << "      Computing polygon switch function..." << std::endl;
     OutputStructScalar switchOutput = polygonSwitch(Position, PolygonUsed, DiffeoParams);
     double sigma = switchOutput.Value;
     std::vector<double> sigmad = switchOutput.Gradient;
     std::vector<std::vector<double>> sigmadd = switchOutput.Hessian;
-    
-    std::cout << "      Polygon switch results:" << std::endl;
-    std::cout << "        sigma (switch value): " << sigma << std::endl;
-    std::cout << "        sigmad (gradient): [" << sigmad[0] << ", " << sigmad[1] << "]" << std::endl;
-    std::cout << "        sigmadd (hessian): [[" << sigmadd[0][0] << ", " << sigmadd[0][1] << "], [" << sigmadd[1][0] << ", " << sigmadd[1][1] << "]]" << std::endl;
 
     // Compute the polygon deforming factor
-    std::cout << "      Computing polygon deforming factor..." << std::endl;
     OutputStructScalar deformingFactorOutput = polygonDeformingFactor(Position, PolygonUsed);
     double nu = deformingFactorOutput.Value;
     std::vector<double> nud = deformingFactorOutput.Gradient;
     std::vector<std::vector<double>> nudd = deformingFactorOutput.Hessian;
-    
-    std::cout << "      Deforming factor results:" << std::endl;
-    std::cout << "        nu (deforming factor): " << nu << std::endl;
-    std::cout << "        nud (gradient): [" << nud[0] << ", " << nud[1] << "]" << std::endl;
-    std::cout << "        nudd (hessian): [[" << nudd[0][0] << ", " << nudd[0][1] << "], [" << nudd[1][0] << ", " << nudd[1][1] << "]]" << std::endl;
 
     // Extract the center
     std::vector<double> center = {PolygonUsed.get_center().get<0>(), PolygonUsed.get_center().get<1>()};
-    std::cout << "      Extracted center: [" << center[0] << ", " << center[1] << "]" << std::endl;
 
     // Find the map and its jacobian
-    std::cout << "      Computing transformation map..." << std::endl;
-    
-    // Intermediate calculations
+    std::vector<double> map_h = {sigma*(center[0] + nu*(Position[0]-center[0])) + (1.0-sigma)*Position[0],
+                                 sigma*(center[1] + nu*(Position[1]-center[1])) + (1.0-sigma)*Position[1]};
     std::vector<double> PositionMinusCenter = {Position[0]-center[0], Position[1]-center[1]};
-    std::cout << "        Position - Center: [" << PositionMinusCenter[0] << ", " << PositionMinusCenter[1] << "]" << std::endl;
-    
-    // Transformation formula breakdown
-    double term1_x = sigma*center[0];
-    double term2_x = sigma*nu*(Position[0]-center[0]);
-    double term3_x = (1.0-sigma)*Position[0];
-    double map_h_x = term1_x + term2_x + term3_x;
-    
-    double term1_y = sigma*center[1];
-    double term2_y = sigma*nu*(Position[1]-center[1]);
-    double term3_y = (1.0-sigma)*Position[1];
-    double map_h_y = term1_y + term2_y + term3_y;
-    
-    std::cout << "        Transformation breakdown (x-component):" << std::endl;
-    std::cout << "          sigma*center[0] = " << sigma << "*" << center[0] << " = " << term1_x << std::endl;
-    std::cout << "          sigma*nu*(pos[0]-center[0]) = " << sigma << "*" << nu << "*" << PositionMinusCenter[0] << " = " << term2_x << std::endl;
-    std::cout << "          (1-sigma)*pos[0] = " << (1.0-sigma) << "*" << Position[0] << " = " << term3_x << std::endl;
-    std::cout << "          map_h[0] = " << term1_x << " + " << term2_x << " + " << term3_x << " = " << map_h_x << std::endl;
-    
-    std::cout << "        Transformation breakdown (y-component):" << std::endl;
-    std::cout << "          sigma*center[1] = " << sigma << "*" << center[1] << " = " << term1_y << std::endl;
-    std::cout << "          sigma*nu*(pos[1]-center[1]) = " << sigma << "*" << nu << "*" << PositionMinusCenter[1] << " = " << term2_y << std::endl;
-    std::cout << "          (1-sigma)*pos[1] = " << (1.0-sigma) << "*" << Position[1] << " = " << term3_y << std::endl;
-    std::cout << "          map_h[1] = " << term1_y << " + " << term2_y << " + " << term3_y << " = " << map_h_y << std::endl;
-    
-    std::vector<double> map_h = {map_h_x, map_h_y};
-    std::cout << "        Final transformed position: [" << map_h[0] << ", " << map_h[1] << "]" << std::endl;
-    
-    // Jacobian calculation with intermediate steps
-    std::cout << "      Computing jacobian matrix..." << std::endl;
     std::vector<std::vector<double>> SigmadOuter = VectorOuterProduct(PositionMinusCenter, sigmad);
     std::vector<std::vector<double>> NudOuter = VectorOuterProduct(PositionMinusCenter, nud);
-    
-    std::cout << "        SigmadOuter (PositionMinusCenter ⊗ sigmad): [[" << SigmadOuter[0][0] << ", " << SigmadOuter[0][1] << "], [" << SigmadOuter[1][0] << ", " << SigmadOuter[1][1] << "]]" << std::endl;
-    std::cout << "        NudOuter (PositionMinusCenter ⊗ nud): [[" << NudOuter[0][0] << ", " << NudOuter[0][1] << "], [" << NudOuter[1][0] << ", " << NudOuter[1][1] << "]]" << std::endl;
-    
-    // Jacobian components breakdown
-    double j00_term1 = (nu-1.0)*SigmadOuter[0][0];
-    double j00_term2 = sigma*NudOuter[0][0];
-    double j00_term3 = (1.0+sigma*(nu-1.0));
-    double j00 = j00_term1 + j00_term2 + j00_term3;
-    
-    double j01_term1 = (nu-1.0)*SigmadOuter[0][1];
-    double j01_term2 = sigma*NudOuter[0][1];
-    double j01 = j01_term1 + j01_term2;
-    
-    double j10_term1 = (nu-1.0)*SigmadOuter[1][0];
-    double j10_term2 = sigma*NudOuter[1][0];
-    double j10 = j10_term1 + j10_term2;
-    
-    double j11_term1 = (nu-1.0)*SigmadOuter[1][1];
-    double j11_term2 = sigma*NudOuter[1][1];
-    double j11_term3 = (1.0+sigma*(nu-1.0));
-    double j11 = j11_term1 + j11_term2 + j11_term3;
-    
-    std::cout << "        Jacobian calculation breakdown:" << std::endl;
-    std::cout << "          j[0][0] = " << j00_term1 << " + " << j00_term2 << " + " << j00_term3 << " = " << j00 << std::endl;
-    std::cout << "          j[0][1] = " << j01_term1 << " + " << j01_term2 << " = " << j01 << std::endl;
-    std::cout << "          j[1][0] = " << j10_term1 << " + " << j10_term2 << " = " << j10 << std::endl;
-    std::cout << "          j[1][1] = " << j11_term1 << " + " << j11_term2 << " + " << j11_term3 << " = " << j11 << std::endl;
-    
-    std::vector<std::vector<double>> map_hd = {{j00, j01}, {j10, j11}};
-    std::cout << "        Final jacobian: [[" << map_hd[0][0] << ", " << map_hd[0][1] << "], [" << map_hd[1][0] << ", " << map_hd[1][1] << "]]" << std::endl;
+    std::vector<std::vector<double>> map_hd = {{(nu-1.0)*SigmadOuter[0][0] + sigma*NudOuter[0][0] + (1.0+sigma*(nu-1.0)), (nu-1.0)*SigmadOuter[0][1] + sigma*NudOuter[0][1]}, {(nu-1.0)*SigmadOuter[1][0] + sigma*NudOuter[1][0], (nu-1.0)*SigmadOuter[1][1] + sigma*NudOuter[1][1] + (1.0+sigma*(nu-1.0))}};
 
     // Find the derivatives of the jacobian
-    std::cout << "      Computing hessian components (8 total)..." << std::endl;
-    
-    // Hessian component 1: ∂²h₁/∂x₁² 
-    double term1_h00 = 2.0*sigma*nud[0];
-    double term2_h00 = 2.0*(nu-1.0)*sigmad[0];
-    double term3_h00 = 2.0*(Position[0]-center[0])*sigmad[0]*nud[0];
-    double term4_h00 = (Position[0]-center[0])*sigma*nudd[0][0];
-    double term5_h00 = (Position[0]-center[0])*(nu-1.0)*sigmadd[0][0];
-    double map_hdd_m0_r0_s0 = term1_h00 + term2_h00 + term3_h00 + term4_h00 + term5_h00;
-    std::cout << "        h[0][0][0] = " << term1_h00 << " + " << term2_h00 << " + " << term3_h00 << " + " << term4_h00 << " + " << term5_h00 << " = " << map_hdd_m0_r0_s0 << std::endl;
-    
-    // Hessian component 2: ∂²h₁/∂x₁∂x₂
-    double term1_h01 = sigma*nud[1];
-    double term2_h01 = (nu-1.0)*sigmad[1];
-    double term3_h01 = (Position[0]-center[0])*sigmad[1]*nud[0];
-    double term4_h01 = (Position[0]-center[0])*sigma*nudd[0][1];
-    double term5_h01 = (Position[0]-center[0])*sigmad[0]*nud[1];
-    double term6_h01 = (Position[0]-center[0])*(nu-1.0)*sigmadd[0][1];
-    double map_hdd_m0_r0_s1 = term1_h01 + term2_h01 + term3_h01 + term4_h01 + term5_h01 + term6_h01;
-    std::cout << "        h[0][0][1] = " << term1_h01 << " + " << term2_h01 << " + " << term3_h01 << " + " << term4_h01 << " + " << term5_h01 << " + " << term6_h01 << " = " << map_hdd_m0_r0_s1 << std::endl;
-    
-    // Remaining components in shortened form for space
+    double map_hdd_m0_r0_s0 = 2.0*sigma*nud[0]+2.0*(nu-1.0)*sigmad[0]+2.0*(Position[0]-center[0])*sigmad[0]*nud[0]+(Position[0]-center[0])*sigma*nudd[0][0]+(Position[0]-center[0])*(nu-1.0)*sigmadd[0][0];
+    double map_hdd_m0_r0_s1 = sigma*nud[1]+(nu-1.0)*sigmad[1]+(Position[0]-center[0])*sigmad[1]*nud[0]+(Position[0]-center[0])*sigma*nudd[0][1]+(Position[0]-center[0])*sigmad[0]*nud[1]+(Position[0]-center[0])*(nu-1.0)*sigmadd[0][1];
     double map_hdd_m0_r1_s0 = sigma*nud[1]+(Position[0]-center[0])*sigmad[0]*nud[1]+(Position[0]-center[0])*sigma*nudd[0][1]+(nu-1.0)*sigmad[1]+(Position[0]-center[0])*sigmad[1]*nud[0]+(Position[0]-center[0])*(nu-1.0)*sigmadd[0][1];
     double map_hdd_m0_r1_s1 = 2.0*(Position[0]-center[0])*sigmad[1]*nud[1]+(Position[0]-center[0])*sigma*nudd[1][1]+(Position[0]-center[0])*(nu-1.0)*sigmadd[1][1];
     double map_hdd_m1_r0_s0 = 2.0*(Position[1]-center[1])*sigmad[0]*nud[0]+(Position[1]-center[1])*sigma*nudd[0][0]+(Position[1]-center[1])*(nu-1.0)*sigmadd[0][0];
@@ -1292,27 +942,9 @@ OutputStructVector polygonDiffeo(std::vector<double> Position, PolygonClass Poly
     double map_hdd_m1_r1_s0 = sigma*nud[0]+(nu-1.0)*sigmad[0]+(Position[1]-center[1])*sigmad[0]*nud[1]+(Position[1]-center[1])*sigma*nudd[0][1]+(Position[1]-center[1])*sigmad[1]*nud[0]+(Position[1]-center[1])*(nu-1.0)*sigmadd[0][1];
     double map_hdd_m1_r1_s1 = 2.0*sigma*nud[1]+2.0*(nu-1.0)*sigmad[1]+2.0*(Position[1]-center[1])*sigmad[1]*nud[1]+(Position[1]-center[1])*sigma*nudd[1][1]+(Position[1]-center[1])*(nu-1.0)*sigmadd[1][1];
     
-    std::cout << "        Remaining hessian components:" << std::endl;
-    std::cout << "        h[0][1][0] = " << map_hdd_m0_r1_s0 << std::endl;
-    std::cout << "        h[0][1][1] = " << map_hdd_m0_r1_s1 << std::endl;
-    std::cout << "        h[1][0][0] = " << map_hdd_m1_r0_s0 << std::endl;
-    std::cout << "        h[1][0][1] = " << map_hdd_m1_r0_s1 << std::endl;
-    std::cout << "        h[1][1][0] = " << map_hdd_m1_r1_s0 << std::endl;
-    std::cout << "        h[1][1][1] = " << map_hdd_m1_r1_s1 << std::endl;
-    
     std::vector<double> map_hdd = {map_hdd_m0_r0_s0, map_hdd_m0_r0_s1, map_hdd_m0_r1_s0, map_hdd_m0_r1_s1, map_hdd_m1_r0_s0, map_hdd_m1_r0_s1, map_hdd_m1_r1_s0, map_hdd_m1_r1_s1};
-    std::cout << "        Final hessian: [" << map_hdd[0] << ", " << map_hdd[1] << ", " << map_hdd[2] << ", " << map_hdd[3] << ", " << map_hdd[4] << ", " << map_hdd[5] << ", " << map_hdd[6] << ", " << map_hdd[7] << "]" << std::endl;
 
     // Construct the output
-    std::cout << "    === DEBUG: polygonDiffeo COMPLETED ===" << std::endl;
-    std::cout << "      TRANSFORMATION SUMMARY:" << std::endl;
-    std::cout << "        Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-    std::cout << "        Output position: [" << map_h[0] << ", " << map_h[1] << "]" << std::endl;
-    std::cout << "        Position displacement: [" << (map_h[0] - Position[0]) << ", " << (map_h[1] - Position[1]) << "]" << std::endl;
-    std::cout << "        Switch value (sigma): " << sigma << " (0=no effect, 1=full transformation)" << std::endl;
-    std::cout << "        Deforming factor (nu): " << nu << " (distance-based scaling)" << std::endl;
-    std::cout << "        Final jacobian: [[" << map_hd[0][0] << ", " << map_hd[0][1] << "], [" << map_hd[1][0] << ", " << map_hd[1][1] << "]]" << std::endl;
-    
     OutputStructVector Output;
     Output.Value = map_h;
     Output.Jacobian = map_hd;
@@ -1397,23 +1029,8 @@ OutputStructScalar polygonSwitch(std::vector<double> Position, PolygonClass Poly
      *  1) Output: Output struct containing the value, gradient and hessian
      */
 
-    std::cout << "\n        === DEBUG: polygonSwitch STARTED ===" << std::endl;
-    std::cout << "          Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-    
-    // Print polygon center for reference
-    point center_point = PolygonUsed.get_center();
-    std::cout << "          Polygon center: (" << center_point.get<0>() << ", " << center_point.get<1>() << ")" << std::endl;
-    
-    // Print diffeomorphism parameters
-    std::cout << "          Diffeo parameters:" << std::endl;
-    std::cout << "            mu_1: " << DiffeoParams.get_mu_1() << " (beta switch sharpness)" << std::endl;
-    std::cout << "            mu_2: " << DiffeoParams.get_mu_2() << " (gamma switch sharpness)" << std::endl;
-    std::cout << "            epsilon: " << DiffeoParams.get_epsilon() << " (boundary threshold)" << std::endl;
-
     // Find the separate switch values, gradients and hessians
-    std::cout << "          Computing beta switch (boundary proximity)..." << std::endl;
     OutputStructScalar BetaOutput = polygonBetaSwitch(Position, PolygonUsed, DiffeoParams);
-    std::cout << "          Computing gamma switch (inside/outside measure)..." << std::endl;
     OutputStructScalar GammaOutput = polygonGammaSwitch(Position, PolygonUsed, DiffeoParams);
 
     // Unwrap values
@@ -1423,46 +1040,23 @@ OutputStructScalar polygonSwitch(std::vector<double> Position, PolygonClass Poly
     double sigma_gamma = GammaOutput.Value;
     std::vector<double> sigma_gammad = GammaOutput.Gradient;
     std::vector<std::vector<double>> sigma_gammadd = GammaOutput.Hessian;
-    
-    std::cout << "          Beta switch results:" << std::endl;
-    std::cout << "            sigma_beta (boundary effect): " << sigma_beta << std::endl;
-    std::cout << "            sigma_betad (gradient): [" << sigma_betad[0] << ", " << sigma_betad[1] << "]" << std::endl;
-    std::cout << "            sigma_betadd (hessian): [[" << sigma_betadd[0][0] << ", " << sigma_betadd[0][1] << "], [" << sigma_betadd[1][0] << ", " << sigma_betadd[1][1] << "]]" << std::endl;
-    
-    std::cout << "          Gamma switch results:" << std::endl;
-    std::cout << "            sigma_gamma (inside effect): " << sigma_gamma << std::endl;
-    std::cout << "            sigma_gammad (gradient): [" << sigma_gammad[0] << ", " << sigma_gammad[1] << "]" << std::endl;
-    std::cout << "            sigma_gammadd (hessian): [[" << sigma_gammadd[0][0] << ", " << sigma_gammadd[0][1] << "], [" << sigma_gammadd[1][0] << ", " << sigma_gammadd[1][1] << "]]" << std::endl;
 
     // Find the overall switch value gradient and hessian
-    std::cout << "          Combining beta and gamma switches..." << std::endl;
-    std::cout << "            Special case check: (sigma_beta == 1.0) && (sigma_gamma == 0.0) = " << 
-                 ((sigma_beta == 1.0) && (sigma_gamma == 0.0) ? "TRUE" : "FALSE") << std::endl;
-    
     double sigma;
     std::vector<double> sigmad;
     std::vector<std::vector<double>> sigmadd;
     if ((sigma_beta == 1.0) && (sigma_gamma == 0.0)) {
-        std::cout << "            Using special case: sigma = 1.0 (direct assignment)" << std::endl;
         sigma = 1.0;
         sigmad = {0.0, 0.0};
         sigmadd = {{0.0, 0.0}, {0.0, 0.0}};
     } else {
-        std::cout << "            Using combination formula: sigma = (sigma_beta * sigma_gamma) / (sigma_beta * sigma_gamma + (1 - sigma_beta))" << std::endl;
         double nom = sigma_beta*sigma_gamma;
         double denom = sigma_beta*sigma_gamma + (1-sigma_beta);
-        std::cout << "              numerator (nom) = " << sigma_beta << " * " << sigma_gamma << " = " << nom << std::endl;
-        std::cout << "              denominator (denom) = " << nom << " + (1 - " << sigma_beta << ") = " << nom << " + " << (1-sigma_beta) << " = " << denom << std::endl;
         sigma = nom/denom;
-        std::cout << "              final sigma = " << nom << " / " << denom << " = " << sigma << std::endl;
 
-        std::cout << "              Computing gradient (chain rule)..." << std::endl;
         std::vector<double> nomd = {sigma_gamma*sigma_betad[0] + sigma_beta*sigma_gammad[0], sigma_gamma*sigma_betad[1] + sigma_beta*sigma_gammad[1]};
         std::vector<double> denomd = {sigma_gamma*sigma_betad[0] + sigma_beta*sigma_gammad[0] - sigma_betad[0], sigma_gamma*sigma_betad[1] + sigma_beta*sigma_gammad[1] - sigma_betad[1]};
-        std::cout << "                nomd (numerator gradient): [" << nomd[0] << ", " << nomd[1] << "]" << std::endl;
-        std::cout << "                denomd (denominator gradient): [" << denomd[0] << ", " << denomd[1] << "]" << std::endl;
         sigmad = {(1.0/denom)*nomd[0] - (nom/pow(denom,2.0))*denomd[0], (1.0/denom)*nomd[1] - (nom/pow(denom,2.0))*denomd[1]};
-        std::cout << "                final sigmad: [" << sigmad[0] << ", " << sigmad[1] << "]" << std::endl;
 
         std::vector<std::vector<double>> BetaGammaOuter = VectorOuterProduct(sigma_betad, sigma_gammad);
         std::vector<std::vector<double>> GammaBetaOuter = VectorOuterProduct(sigma_gammad, sigma_betad);
@@ -1471,18 +1065,8 @@ OutputStructScalar polygonSwitch(std::vector<double> Position, PolygonClass Poly
         std::vector<std::vector<double>> NomDenomOuter = VectorOuterProduct(nomd, denomd);
         std::vector<std::vector<double>> DenomNomOuter = VectorOuterProduct(denomd, nomd);
         std::vector<std::vector<double>> DenomDenomOuter = VectorOuterProduct(denomd, denomd);
-        std::cout << "              Computing hessian (complex chain rule)..." << std::endl;
         sigmadd = {{(1.0/denom)*nomdd[0][0] - (1.0/pow(denom,2.0))*(NomDenomOuter[0][0]+DenomNomOuter[0][0]) + 2.0*(nom/pow(denom,3.0))*DenomDenomOuter[0][0] - (nom/pow(denom,2.0))*denomdd[0][0], (1.0/denom)*nomdd[0][1] - (1.0/pow(denom,2.0))*(NomDenomOuter[0][1]+DenomNomOuter[0][1]) + 2.0*(nom/pow(denom,3.0))*DenomDenomOuter[0][1] - (nom/pow(denom,2.0))*denomdd[0][1]}, {(1.0/denom)*nomdd[1][0] - (1.0/pow(denom,2.0))*(NomDenomOuter[1][0]+DenomNomOuter[1][0]) + 2.0*(nom/pow(denom,3.0))*DenomDenomOuter[1][0] - (nom/pow(denom,2.0))*denomdd[1][0], (1.0/denom)*nomdd[1][1] - (1.0/pow(denom,2.0))*(NomDenomOuter[1][1]+DenomNomOuter[1][1]) + 2.0*(nom/pow(denom,3.0))*DenomDenomOuter[1][1] - (nom/pow(denom,2.0))*denomdd[1][1]}};
     }
-
-    std::cout << "        === DEBUG: polygonSwitch COMPLETED ===" << std::endl;
-    std::cout << "          SWITCH SUMMARY:" << std::endl;
-    std::cout << "            Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-    std::cout << "            Beta effect: " << sigma_beta << " (boundary proximity)" << std::endl;
-    std::cout << "            Gamma effect: " << sigma_gamma << " (inside/outside measure)" << std::endl;
-    std::cout << "            FINAL SWITCH VALUE: " << sigma << " (0=no effect, 1=full transformation)" << std::endl;
-    std::cout << "            Final gradient: [" << sigmad[0] << ", " << sigmad[1] << "]" << std::endl;
-    std::cout << "            Final hessian: [[" << sigmadd[0][0] << ", " << sigmadd[0][1] << "], [" << sigmadd[1][0] << ", " << sigmadd[1][1] << "]]" << std::endl;
 
     // Construct the output
     OutputStructScalar Output;
@@ -1674,75 +1258,30 @@ OutputStructScalar polygonBetaSwitch(std::vector<double> Position, PolygonClass 
      *  1) Output: Output struct containing the value, gradient and hessian
      */
 
-    std::cout << "\n            === DEBUG: polygonBetaSwitch STARTED ===" << std::endl;
-    std::cout << "              Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-
     // Unwrap parameters
     double mu_1 = DiffeoParams.get_mu_1();
     double epsilon = DiffeoParams.get_epsilon();
-    
-    std::cout << "              Beta switch parameters:" << std::endl;
-    std::cout << "                mu_1 (sharpness): " << mu_1 << std::endl;
-    std::cout << "                epsilon (boundary threshold): " << epsilon << std::endl;
 
     // Compute the value of beta and its gradient and hessian
-    std::cout << "              Computing boundary distance (beta)..." << std::endl;
     OutputStructScalar BetaOutput = polygonOutsideImplicit(Position, PolygonUsed, DiffeoParams);
     double beta = BetaOutput.Value;
     std::vector<double> betad = BetaOutput.Gradient;
     std::vector<std::vector<double>> betadd = BetaOutput.Hessian;
-    
-    std::cout << "              Boundary distance results:" << std::endl;
-    std::cout << "                beta (distance to boundary): " << beta << std::endl;
-    std::cout << "                betad (gradient): [" << betad[0] << ", " << betad[1] << "]" << std::endl;
-    std::cout << "                betadd (hessian): [[" << betadd[0][0] << ", " << betadd[0][1] << "], [" << betadd[1][0] << ", " << betadd[1][1] << "]]" << std::endl;
 
     // Compute the value of the switch
-    std::cout << "              Computing beta switch value..." << std::endl;
-    std::cout << "                Checking condition: beta >= epsilon → " << beta << " >= " << epsilon << " = " << (beta >= epsilon ? "TRUE" : "FALSE") << std::endl;
-    
     double sigma;
     std::vector<double> sigmad;
     std::vector<std::vector<double>> sigmadd;
     if (beta >= epsilon) {
-        std::cout << "                Far from boundary case: sigma_beta = 0 (no boundary effect)" << std::endl;
         sigma = 0.0;
         sigmad = {0.0, 0.0};
         sigmadd = {{0.0, 0.0}, {0.0, 0.0}};
     } else {
-        std::cout << "                Close to boundary case: using exponential formula" << std::endl;
-        double epsilon_minus_beta = epsilon - beta;
-        double exp_term = exp(-mu_1/epsilon_minus_beta);
-        double exp_normalization = exp(-mu_1/epsilon);
-        std::cout << "                  epsilon - beta = " << epsilon << " - " << beta << " = " << epsilon_minus_beta << std::endl;
-        std::cout << "                  exp(-mu_1/(epsilon-beta)) = exp(-" << mu_1 << "/" << epsilon_minus_beta << ") = " << exp_term << std::endl;
-        std::cout << "                  exp(-mu_1/epsilon) = exp(-" << mu_1 << "/" << epsilon << ") = " << exp_normalization << std::endl;
-        
-        sigma = exp_term / exp_normalization;
-        std::cout << "                  sigma_beta = " << exp_term << " / " << exp_normalization << " = " << sigma << std::endl;
-        
-        std::cout << "                Computing gradient..." << std::endl;
-        double sigma_coeff = -mu_1*(sigma/pow(epsilon_minus_beta,2.0));
-        sigmad = {sigma_coeff*betad[0], sigma_coeff*betad[1]};
-        std::cout << "                  sigma coefficient = " << sigma_coeff << std::endl;
-        std::cout << "                  sigmad = [" << sigmad[0] << ", " << sigmad[1] << "]" << std::endl;
-        
-        std::cout << "                Computing hessian..." << std::endl;
+        sigma = exp(-mu_1/(epsilon-beta))/exp(-mu_1/epsilon);
+        sigmad = {-mu_1*(sigma/pow(epsilon-beta,2.0))*betad[0], -mu_1*(sigma/pow(epsilon-beta,2.0))*betad[1]};
         std::vector<std::vector<double>> BetadOuter = VectorOuterProduct(betad, betad);
-        double hess_coeff1 = (pow(mu_1,2.0)*(sigma/pow(epsilon_minus_beta,4.0)))-2.0*mu_1*(sigma/pow(epsilon_minus_beta,3.0));
-        double hess_coeff2 = -mu_1*(sigma/pow(epsilon_minus_beta,2.0));
-        sigmadd = {{hess_coeff1*BetadOuter[0][0] + hess_coeff2*betadd[0][0], hess_coeff1*BetadOuter[0][1] + hess_coeff2*betadd[0][1]}, {hess_coeff1*BetadOuter[1][0] + hess_coeff2*betadd[1][0], hess_coeff1*BetadOuter[1][1] + hess_coeff2*betadd[1][1]}};
-        std::cout << "                  hessian coefficients: [" << hess_coeff1 << ", " << hess_coeff2 << "]" << std::endl;
-        std::cout << "                  sigmadd = [[" << sigmadd[0][0] << ", " << sigmadd[0][1] << "], [" << sigmadd[1][0] << ", " << sigmadd[1][1] << "]]" << std::endl;
+        sigmadd = {{((pow(mu_1,2.0)*(sigma/pow(epsilon-beta,4.0)))-2.0*mu_1*(sigma/pow(epsilon-beta,3.0)))*BetadOuter[0][0] - mu_1*(sigma/pow(epsilon-beta,2.0))*betadd[0][0], ((pow(mu_1,2.0)*(sigma/pow(epsilon-beta,4.0)))-2.0*mu_1*(sigma/pow(epsilon-beta,3.0)))*BetadOuter[0][1] - mu_1*(sigma/pow(epsilon-beta,2.0))*betadd[0][1]}, {((pow(mu_1,2.0)*(sigma/pow(epsilon-beta,4.0)))-2.0*mu_1*(sigma/pow(epsilon-beta,3.0)))*BetadOuter[1][0] - mu_1*(sigma/pow(epsilon-beta,2.0))*betadd[1][0], ((pow(mu_1,2.0)*(sigma/pow(epsilon-beta,4.0)))-2.0*mu_1*(sigma/pow(epsilon-beta,3.0)))*BetadOuter[1][1] - mu_1*(sigma/pow(epsilon-beta,2.0))*betadd[1][1]}};
     }
-
-    std::cout << "            === DEBUG: polygonBetaSwitch COMPLETED ===" << std::endl;
-    std::cout << "              BETA SWITCH SUMMARY:" << std::endl;
-    std::cout << "                Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-    std::cout << "                Distance to boundary (beta): " << beta << std::endl;
-    std::cout << "                Boundary threshold (epsilon): " << epsilon << std::endl;
-    std::cout << "                FINAL BETA SWITCH VALUE: " << sigma << " (0=far from boundary, 1=at/inside boundary)" << std::endl;
-    std::cout << "                Final gradient: [" << sigmad[0] << ", " << sigmad[1] << "]" << std::endl;
 
     // Construct the output
     OutputStructScalar Output;
@@ -1839,13 +1378,8 @@ OutputStructScalar polygonGammaSwitch(std::vector<double> Position, PolygonClass
      *  1) Output: Output struct containing the value, gradient and hessian
      */
 
-    std::cout << "\n            === DEBUG: polygonGammaSwitch STARTED ===" << std::endl;
-    std::cout << "              Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-
     // Unwrap parameters
     double mu_2 = DiffeoParams.get_mu_2();
-    std::cout << "              Gamma switch parameters:" << std::endl;
-    std::cout << "                mu_2 (sharpness): " << mu_2 << std::endl;
 
     // Make position a point
     point PositionPoint(Position[0], Position[1]);
@@ -1853,56 +1387,31 @@ OutputStructScalar polygonGammaSwitch(std::vector<double> Position, PolygonClass
     // Unwrap center properties
     point CenterPoint = PolygonUsed.get_center();
     std::vector<double> Center = {CenterPoint.get<0>(), CenterPoint.get<1>()};
-    std::cout << "                Polygon center: [" << Center[0] << ", " << Center[1] << "]" << std::endl;
-    
-    double distance_to_center = bg::distance(PositionPoint, CenterPoint);
-    std::cout << "                Distance to center: " << distance_to_center << std::endl;
 
     // Compute the value of gamma and its gradient and hessian
-    std::cout << "              Computing inside-ness measure (gamma)..." << std::endl;
     OutputStructScalar GammaOutput = polygonInsideImplicit(Position, PolygonUsed, DiffeoParams);
     double gamma = GammaOutput.Value;
     std::vector<double> gammad = GammaOutput.Gradient;
     std::vector<std::vector<double>> gammadd = GammaOutput.Hessian;
-    
-    std::cout << "              Inside-ness results:" << std::endl;
-    std::cout << "                gamma (inside measure): " << gamma << std::endl;
-    std::cout << "                gammad (gradient): [" << gammad[0] << ", " << gammad[1] << "]" << std::endl;
-    std::cout << "                gammadd (hessian): [[" << gammadd[0][0] << ", " << gammadd[0][1] << "], [" << gammadd[1][0] << ", " << gammadd[1][1] << "]]" << std::endl;
 
     // Compute the value of the switch
-    std::cout << "              Computing gamma switch value..." << std::endl;
-    std::cout << "                Checking condition: gamma <= 0.01 → " << gamma << " <= 0.01 = " << (gamma <= 0.01 ? "TRUE" : "FALSE") << std::endl;
-    
     double sigma;
     std::vector<double> sigmad;
     std::vector<std::vector<double>> sigmadd;
     if (gamma<=0.01) {
-        std::cout << "                Very low inside-ness case: sigma_gamma = 0 (no inside effect)" << std::endl;
         sigma = 0.0;
         sigmad = {0.0, 0.0};
         sigmadd = {{0.0, 0.0}, {0.0, 0.0}};
     } else {
-        std::cout << "                Significant inside-ness case: computing alpha = gamma / distance_to_center" << std::endl;
         // Compute the value of alpha and its gradient and hessian
         double nom = gamma;
         double denom = bg::distance(PositionPoint, CenterPoint);
         double alpha = nom/denom;
-        
-        std::cout << "                Alpha calculation:" << std::endl;
-        std::cout << "                  numerator (gamma) = " << nom << std::endl;
-        std::cout << "                  denominator (distance to center) = " << denom << std::endl;
-        std::cout << "                  alpha = " << nom << " / " << denom << " = " << alpha << std::endl;
 
-        std::cout << "                Computing alpha gradient..." << std::endl;
         std::vector<double> nomd = gammad;
         std::vector<double> denomd = {(1.0/bg::distance(PositionPoint, CenterPoint))*(Position[0]-Center[0]), (1.0/bg::distance(PositionPoint, CenterPoint))*(Position[1]-Center[1])};
         std::vector<double> alphad = {(1.0/denom)*nomd[0]-(nom/pow(denom,2.0))*denomd[0], (1.0/denom)*nomd[1]-(nom/pow(denom,2.0))*denomd[1]};
-        std::cout << "                  nomd (gamma gradient): [" << nomd[0] << ", " << nomd[1] << "]" << std::endl;
-        std::cout << "                  denomd (distance gradient): [" << denomd[0] << ", " << denomd[1] << "]" << std::endl;
-        std::cout << "                  alphad: [" << alphad[0] << ", " << alphad[1] << "]" << std::endl;
 
-        std::cout << "                Computing alpha hessian (complex chain rule)..." << std::endl;
         std::vector<std::vector<double>> nomdd = gammadd;
         std::vector<double> PositionMinusCenter = {Position[0]-Center[0], Position[1]-Center[1]};
         std::vector<std::vector<double>> PositionPositionOuter = VectorOuterProduct(PositionMinusCenter, PositionMinusCenter);
@@ -1912,33 +1421,11 @@ OutputStructScalar polygonGammaSwitch(std::vector<double> Position, PolygonClass
         std::vector<std::vector<double>> DenomDenomOuter = VectorOuterProduct(denomd, denomd);
         std::vector<std::vector<double>> alphadd = {{(1.0/denom)*nomdd[0][0] - (1.0/pow(denom,2.0))*(NomDenomOuter[0][0]+DenomNomOuter[0][0]) + 2.0*(nom/pow(denom,3.0))*DenomDenomOuter[0][0] - (nom/pow(denom,2.0))*denomdd[0][0], (1.0/denom)*nomdd[0][1] - (1.0/pow(denom,2.0))*(NomDenomOuter[0][1]+DenomNomOuter[0][1]) + 2.0*(nom/pow(denom,3.0))*DenomDenomOuter[0][1] - (nom/pow(denom,2.0))*denomdd[0][1]}, {(1.0/denom)*nomdd[1][0] - (1.0/pow(denom,2.0))*(NomDenomOuter[1][0]+DenomNomOuter[1][0]) + 2.0*(nom/pow(denom,3.0))*DenomDenomOuter[1][0] - (nom/pow(denom,2.0))*denomdd[1][0], (1.0/denom)*nomdd[1][1] - (1.0/pow(denom,2.0))*(NomDenomOuter[1][1]+DenomNomOuter[1][1]) + 2.0*(nom/pow(denom,3.0))*DenomDenomOuter[1][1] - (nom/pow(denom,2.0))*denomdd[1][1]}};
 
-        std::cout << "                Computing final exponential switch: sigma_gamma = exp(-mu_2/alpha)" << std::endl;
-        std::cout << "                  exp(-mu_2/alpha) = exp(-" << mu_2 << "/" << alpha << ") = exp(" << (-mu_2/alpha) << ")" << std::endl;
         sigma = exp(-mu_2/alpha);
-        std::cout << "                  sigma_gamma = " << sigma << std::endl;
-        
-        std::cout << "                Computing gamma switch gradient..." << std::endl;
-        double sigma_coeff = mu_2*(sigma/pow(alpha,2.0));
-        sigmad = {sigma_coeff*alphad[0], sigma_coeff*alphad[1]};
-        std::cout << "                  sigma coefficient = " << sigma_coeff << std::endl;
-        std::cout << "                  sigmad = [" << sigmad[0] << ", " << sigmad[1] << "]" << std::endl;
-        
-        std::cout << "                Computing gamma switch hessian..." << std::endl;
+        sigmad = {mu_2*(sigma/pow(alpha,2.0))*alphad[0], mu_2*(sigma/pow(alpha,2.0))*alphad[1]};
         std::vector<std::vector<double>> AlphadOuter = VectorOuterProduct(alphad, alphad);
-        double hess_coeff1 = pow(mu_2,2.0)*(sigma/pow(alpha,4.0))-2.0*mu_2*(sigma/pow(alpha,3.0));
-        double hess_coeff2 = mu_2*(sigma/pow(alpha,2.0));
-        sigmadd = {{hess_coeff1*AlphadOuter[0][0]+hess_coeff2*alphadd[0][0], hess_coeff1*AlphadOuter[0][1]+hess_coeff2*alphadd[0][1]}, {hess_coeff1*AlphadOuter[1][0]+hess_coeff2*alphadd[1][0], hess_coeff1*AlphadOuter[1][1]+hess_coeff2*alphadd[1][1]}};
-        std::cout << "                  hessian coefficients: [" << hess_coeff1 << ", " << hess_coeff2 << "]" << std::endl;
-        std::cout << "                  sigmadd = [[" << sigmadd[0][0] << ", " << sigmadd[0][1] << "], [" << sigmadd[1][0] << ", " << sigmadd[1][1] << "]]" << std::endl;
+        sigmadd = {{(pow(mu_2,2.0)*(sigma/pow(alpha,4.0))-2.0*mu_2*(sigma/pow(alpha,3.0)))*AlphadOuter[0][0]+mu_2*(sigma/pow(alpha,2.0))*alphadd[0][0], (pow(mu_2,2.0)*(sigma/pow(alpha,4.0))-2.0*mu_2*(sigma/pow(alpha,3.0)))*AlphadOuter[0][1]+mu_2*(sigma/pow(alpha,2.0))*alphadd[0][1]}, {(pow(mu_2,2.0)*(sigma/pow(alpha,4.0))-2.0*mu_2*(sigma/pow(alpha,3.0)))*AlphadOuter[1][0]+mu_2*(sigma/pow(alpha,2.0))*alphadd[1][0], (pow(mu_2,2.0)*(sigma/pow(alpha,4.0))-2.0*mu_2*(sigma/pow(alpha,3.0)))*AlphadOuter[1][1]+mu_2*(sigma/pow(alpha,2.0))*alphadd[1][1]}};
     }
-
-    std::cout << "            === DEBUG: polygonGammaSwitch COMPLETED ===" << std::endl;
-    std::cout << "              GAMMA SWITCH SUMMARY:" << std::endl;
-    std::cout << "                Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-    std::cout << "                Inside-ness measure (gamma): " << gamma << std::endl;
-    std::cout << "                Distance to center: " << distance_to_center << std::endl;
-    std::cout << "                FINAL GAMMA SWITCH VALUE: " << sigma << " (0=low inside effect, 1=high inside effect)" << std::endl;
-    std::cout << "                Final gradient: [" << sigmad[0] << ", " << sigmad[1] << "]" << std::endl;
 
     // Construct the output
     OutputStructScalar Output;
@@ -2101,12 +1588,8 @@ OutputStructScalar polygonOutsideImplicit(std::vector<double> Position, PolygonC
      *  1) Output: Output struct containing the value, gradient and hessian
      */
 
-    std::cout << "\n                === DEBUG: polygonOutsideImplicit STARTED ===" << std::endl;
-    std::cout << "                  Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-
     // Unwrap parameters
     double p = DiffeoParams.get_p();
-    std::cout << "                  R-function parameter p: " << p << std::endl;
 
     // Make position a point
     point PositionPoint(Position[0], Position[1]);
@@ -2120,28 +1603,12 @@ OutputStructScalar polygonOutsideImplicit(std::vector<double> Position, PolygonC
         PolygonVertexList.push_back({PolygonVertexListPoint[i].get<0>(), PolygonVertexListPoint[i].get<1>()});
         NormalVectorList.push_back({NormalVectorListPoint[i].get<0>(), NormalVectorListPoint[i].get<1>()});
     }
-    
-    std::cout << "                  Polygon data:" << std::endl;
-    std::cout << "                    Number of vertices: " << PolygonVertexList.size() << std::endl;
-    for (size_t i = 0; i < PolygonVertexList.size(); i++) {
-        std::cout << "                    Vertex " << i << ": (" << PolygonVertexList[i][0] << ", " << PolygonVertexList[i][1] << ")" << std::endl;
-        std::cout << "                    Normal " << i << ": (" << NormalVectorList[i][0] << ", " << NormalVectorList[i][1] << ")" << std::endl;
-    }
 
     // Compute hyperplane functions
-    std::cout << "                  Computing hyperplane distances..." << std::endl;
     std::vector<double> hyperplane(PolygonVertexList.size(), 0.0);
     for (size_t i = 0; i < PolygonVertexList.size(); i++) {
-        std::vector<double> pos_minus_vertex = {Position[0]-PolygonVertexList[i][0], Position[1]-PolygonVertexList[i][1]};
-        hyperplane[i] = pos_minus_vertex[0]*NormalVectorList[i][0] + pos_minus_vertex[1]*NormalVectorList[i][1];
-        std::cout << "                    Edge " << i << ": pos-vertex=(" << pos_minus_vertex[0] << ", " << pos_minus_vertex[1] << ") · normal=(" << NormalVectorList[i][0] << ", " << NormalVectorList[i][1] << ") = " << hyperplane[i] << std::endl;
+        hyperplane[i] = (Position[0]-PolygonVertexList[i][0])*NormalVectorList[i][0] + (Position[1]-PolygonVertexList[i][1])*NormalVectorList[i][1];
     }
-    std::cout << "                  Hyperplane values: [";
-    for (size_t i = 0; i < hyperplane.size(); i++) {
-        std::cout << hyperplane[i];
-        if (i < hyperplane.size()-1) std::cout << ", ";
-    }
-    std::cout << "]" << std::endl;
 
     // Compute the R-function and its gradient and hessian
     std::vector<std::vector<double>> N0N0Outer = VectorOuterProduct(NormalVectorList[0], NormalVectorList[0]);
@@ -2152,22 +1619,9 @@ OutputStructScalar polygonOutsideImplicit(std::vector<double> Position, PolygonC
 
     std::vector<double> betad = {(1.0-((pow(hyperplane[0],p-1.0))/(pow(pow(hyperplane[0],p)+pow(hyperplane[1],p),(p-1.0)/p))))*NormalVectorList[0][0] + (1.0-((pow(hyperplane[1],p-1.0))/(pow(pow(hyperplane[0],p)+pow(hyperplane[1],p),(p-1.0)/p))))*NormalVectorList[1][0], (1.0-((pow(hyperplane[0],p-1.0))/(pow(pow(hyperplane[0],p)+pow(hyperplane[1],p),(p-1.0)/p))))*NormalVectorList[0][1] + (1.0-((pow(hyperplane[1],p-1.0))/(pow(pow(hyperplane[0],p)+pow(hyperplane[1],p),(p-1.0)/p))))*NormalVectorList[1][1]};
 
-    std::cout << "                  Computing R-function (boundary distance)..." << std::endl;
-    std::cout << "                  Initial calculation with first two edges:" << std::endl;
-    std::cout << "                    hyperplane[0] = " << hyperplane[0] << std::endl;
-    std::cout << "                    hyperplane[1] = " << hyperplane[1] << std::endl;
-    double sum_term = hyperplane[0] + hyperplane[1];
-    double power_sum = pow(hyperplane[0],p) + pow(hyperplane[1],p);
-    double power_term = pow(power_sum, 1.0/p);
-    double beta = sum_term - power_term;
-    std::cout << "                    sum = " << hyperplane[0] << " + " << hyperplane[1] << " = " << sum_term << std::endl;
-    std::cout << "                    power_sum = " << hyperplane[0] << "^" << p << " + " << hyperplane[1] << "^" << p << " = " << power_sum << std::endl;
-    std::cout << "                    power_term = (" << power_sum << ")^(1/" << p << ") = " << power_term << std::endl;
-    std::cout << "                    initial beta = " << sum_term << " - " << power_term << " = " << beta << std::endl;
+    double beta = hyperplane[0] + hyperplane[1] - pow(pow(hyperplane[0],p)+pow(hyperplane[1],p),1.0/p);
     
     for (size_t i = 2; i < hyperplane.size(); i++) {
-        std::cout << "                  Iteration " << (i-1) << ": Processing edge " << i << " (hyperplane[" << i << "] = " << hyperplane[i] << ")" << std::endl;
-        std::cout << "                    Previous beta: " << beta << std::endl;
         std::vector<std::vector<double>> BetadBetadOuter = VectorOuterProduct(betad, betad);
         std::vector<std::vector<double>> BetaNiOuter = VectorOuterProduct(betad, NormalVectorList[i]);
         std::vector<std::vector<double>> NiBetadOuter = VectorOuterProduct(NormalVectorList[i], betad);
@@ -2176,23 +1630,8 @@ OutputStructScalar polygonOutsideImplicit(std::vector<double> Position, PolygonC
 
         betad = {(1.0-((pow(beta,p-1.0))/(pow(pow(beta,p)+pow(hyperplane[i],p),(p-1.0)/p))))*betad[0] + (1.0-((pow(hyperplane[i],p-1.0))/(pow(pow(beta,p)+pow(hyperplane[i],p),(p-1.0)/p))))*NormalVectorList[i][0], (1.0-((pow(beta,p-1.0))/(pow(pow(beta,p)+pow(hyperplane[i],p),(p-1.0)/p))))*betad[1] + (1.0-((pow(hyperplane[i],p-1.0))/(pow(pow(beta,p)+pow(hyperplane[i],p),(p-1.0)/p))))*NormalVectorList[i][1]};
 
-        double new_sum = beta + hyperplane[i];
-        double new_power_sum = pow(beta,p) + pow(hyperplane[i],p);
-        double new_power_term = pow(new_power_sum, 1.0/p);
-        double new_beta = new_sum - new_power_term;
-        std::cout << "                    Update: " << beta << " + " << hyperplane[i] << " - (" << new_power_sum << ")^(1/" << p << ") = " << new_sum << " - " << new_power_term << " = " << new_beta << std::endl;
-        beta = new_beta;
-        std::cout << "                    Updated beta: " << beta << std::endl;
-        std::cout << "                    Updated betad: [" << betad[0] << ", " << betad[1] << "]" << std::endl;
+        beta = beta + hyperplane[i] - pow(pow(beta,p)+pow(hyperplane[i],p),1.0/p);
     }
-
-    std::cout << "                === DEBUG: polygonOutsideImplicit COMPLETED ===" << std::endl;
-    std::cout << "                  BOUNDARY DISTANCE SUMMARY:" << std::endl;
-    std::cout << "                    Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-    std::cout << "                    Raw R-function result (beta): " << beta << std::endl;
-    std::cout << "                    Final boundary distance: " << (-beta) << " (negative=inside, positive=outside)" << std::endl;
-    std::cout << "                    Final gradient: [" << (-betad[0]) << ", " << (-betad[1]) << "]" << std::endl;
-    std::cout << "                    Final hessian: [[" << (-betadd[0][0]) << ", " << (-betadd[0][1]) << "], [" << (-betadd[1][0]) << ", " << (-betadd[1][1]) << "]]" << std::endl;
 
     // Construct the output
     OutputStructScalar Output;
@@ -2248,22 +1687,9 @@ OutputStructScalar triangleInsideImplicit(std::vector<double> Position, Triangle
 
     std::vector<double> gammad = {(1.0-((pow(hyperplane[0],p-1.0))/(pow(pow(hyperplane[0],p)+pow(hyperplane[1],p),(p-1.0)/p))))*NormalVectorTildeList[0][0] + (1.0-((pow(hyperplane[1],p-1.0))/(pow(pow(hyperplane[0],p)+pow(hyperplane[1],p),(p-1.0)/p))))*NormalVectorTildeList[1][0], (1.0-((pow(hyperplane[0],p-1.0))/(pow(pow(hyperplane[0],p)+pow(hyperplane[1],p),(p-1.0)/p))))*NormalVectorTildeList[0][1] + (1.0-((pow(hyperplane[1],p-1.0))/(pow(pow(hyperplane[0],p)+pow(hyperplane[1],p),(p-1.0)/p))))*NormalVectorTildeList[1][1]};
 
-    std::cout << "                  Computing R-function for inside-ness measure (gamma)..." << std::endl;
-    std::cout << "                  Initial calculation with first two collar edges:" << std::endl;
-    std::cout << "                    hyperplane[0] = " << hyperplane[0] << std::endl;
-    std::cout << "                    hyperplane[1] = " << hyperplane[1] << std::endl;
-    double sum_term = hyperplane[0] + hyperplane[1];
-    double power_sum = pow(hyperplane[0],p) + pow(hyperplane[1],p);
-    double power_term = pow(power_sum, 1.0/p);
-    double gamma = sum_term - power_term;
-    std::cout << "                    sum = " << hyperplane[0] << " + " << hyperplane[1] << " = " << sum_term << std::endl;
-    std::cout << "                    power_sum = " << hyperplane[0] << "^" << p << " + " << hyperplane[1] << "^" << p << " = " << power_sum << std::endl;
-    std::cout << "                    power_term = (" << power_sum << ")^(1/" << p << ") = " << power_term << std::endl;
-    std::cout << "                    initial gamma = " << sum_term << " - " << power_term << " = " << gamma << std::endl;
+    double gamma = hyperplane[0] + hyperplane[1] - pow(pow(hyperplane[0],p)+pow(hyperplane[1],p),1.0/p);
     
     for (size_t i = 2; i < hyperplane.size(); i++) {
-        std::cout << "                  Iteration " << (i-1) << ": Processing collar edge " << i << " (hyperplane[" << i << "] = " << hyperplane[i] << ")" << std::endl;
-        std::cout << "                    Previous gamma: " << gamma << std::endl;
         std::vector<std::vector<double>> GammadGammadOuter = VectorOuterProduct(gammad, gammad);
         std::vector<std::vector<double>> GammadNiOuter = VectorOuterProduct(gammad, NormalVectorTildeList[i]);
         std::vector<std::vector<double>> NiGammadOuter = VectorOuterProduct(NormalVectorTildeList[i], gammad);
@@ -2272,22 +1698,8 @@ OutputStructScalar triangleInsideImplicit(std::vector<double> Position, Triangle
 
         gammad = {(1.0-((pow(gamma,p-1.0))/(pow(pow(gamma,p)+pow(hyperplane[i],p),(p-1.0)/p))))*gammad[0] + (1.0-((pow(hyperplane[i],p-1.0))/(pow(pow(gamma,p)+pow(hyperplane[i],p),(p-1.0)/p))))*NormalVectorTildeList[i][0], (1.0-((pow(gamma,p-1.0))/(pow(pow(gamma,p)+pow(hyperplane[i],p),(p-1.0)/p))))*gammad[1] + (1.0-((pow(hyperplane[i],p-1.0))/(pow(pow(gamma,p)+pow(hyperplane[i],p),(p-1.0)/p))))*NormalVectorTildeList[i][1]};
 
-        double new_sum = gamma + hyperplane[i];
-        double new_power_sum = pow(gamma,p) + pow(hyperplane[i],p);
-        double new_power_term = pow(new_power_sum, 1.0/p);
-        double new_gamma = new_sum - new_power_term;
-        std::cout << "                    Update: " << gamma << " + " << hyperplane[i] << " - (" << new_power_sum << ")^(1/" << p << ") = " << new_sum << " - " << new_power_term << " = " << new_gamma << std::endl;
-        gamma = new_gamma;
-        std::cout << "                    Updated gamma: " << gamma << std::endl;
-        std::cout << "                    Updated gammad: [" << gammad[0] << ", " << gammad[1] << "]" << std::endl;
+        gamma = gamma + hyperplane[i] - pow(pow(gamma,p)+pow(hyperplane[i],p),1.0/p);
     }
-
-    std::cout << "                === DEBUG: polygonInsideImplicit COMPLETED ===" << std::endl;
-    std::cout << "                  INSIDE-NESS SUMMARY:" << std::endl;
-    std::cout << "                    Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-    std::cout << "                    Final inside-ness measure (gamma): " << gamma << " (higher=more inside collar)" << std::endl;
-    std::cout << "                    Final gradient: [" << gammad[0] << ", " << gammad[1] << "]" << std::endl;
-    std::cout << "                    Final hessian: [[" << gammadd[0][0] << ", " << gammadd[0][1] << "], [" << gammadd[1][0] << ", " << gammadd[1][1] << "]]" << std::endl;
 
     // Construct the output
     OutputStructScalar Output;
@@ -2312,12 +1724,8 @@ OutputStructScalar polygonInsideImplicit(std::vector<double> Position, PolygonCl
      *  1) Output: Output struct containing the value, gradient and hessian
      */
 
-    std::cout << "\n                === DEBUG: polygonInsideImplicit STARTED ===" << std::endl;
-    std::cout << "                  Input position: [" << Position[0] << ", " << Position[1] << "]" << std::endl;
-
     // Unwrap parameters
     double p = DiffeoParams.get_p();
-    std::cout << "                  R-function parameter p: " << p << std::endl;
 
     // Make position a point
     point PositionPoint(Position[0], Position[1]);
@@ -2331,28 +1739,12 @@ OutputStructScalar polygonInsideImplicit(std::vector<double> Position, PolygonCl
         PolygonVertexTildeList.push_back({PolygonVertexTildeListPoint[i].get<0>(), PolygonVertexTildeListPoint[i].get<1>()});
         NormalVectorTildeList.push_back({NormalVectorTildeListPoint[i].get<0>(), NormalVectorTildeListPoint[i].get<1>()});
     }
-    
-    std::cout << "                  Polygon collar (tilde) data:" << std::endl;
-    std::cout << "                    Number of collar vertices: " << PolygonVertexTildeList.size() << std::endl;
-    for (size_t i = 0; i < PolygonVertexTildeList.size(); i++) {
-        std::cout << "                    Collar vertex " << i << ": (" << PolygonVertexTildeList[i][0] << ", " << PolygonVertexTildeList[i][1] << ")" << std::endl;
-        std::cout << "                    Collar normal " << i << ": (" << NormalVectorTildeList[i][0] << ", " << NormalVectorTildeList[i][1] << ")" << std::endl;
-    }
 
     // Compute hyperplane functions
-    std::cout << "                  Computing collar hyperplane distances..." << std::endl;
     std::vector<double> hyperplane(PolygonVertexTildeList.size(), 0.0);
     for (size_t i = 0; i < PolygonVertexTildeList.size(); i++) {
-        std::vector<double> pos_minus_vertex = {Position[0]-PolygonVertexTildeList[i][0], Position[1]-PolygonVertexTildeList[i][1]};
-        hyperplane[i] = pos_minus_vertex[0]*NormalVectorTildeList[i][0] + pos_minus_vertex[1]*NormalVectorTildeList[i][1];
-        std::cout << "                    Collar edge " << i << ": pos-vertex=(" << pos_minus_vertex[0] << ", " << pos_minus_vertex[1] << ") · normal=(" << NormalVectorTildeList[i][0] << ", " << NormalVectorTildeList[i][1] << ") = " << hyperplane[i] << std::endl;
+        hyperplane[i] = (Position[0]-PolygonVertexTildeList[i][0])*NormalVectorTildeList[i][0] + (Position[1]-PolygonVertexTildeList[i][1])*NormalVectorTildeList[i][1];
     }
-    std::cout << "                  Collar hyperplane values: [";
-    for (size_t i = 0; i < hyperplane.size(); i++) {
-        std::cout << hyperplane[i];
-        if (i < hyperplane.size()-1) std::cout << ", ";
-    }
-    std::cout << "]" << std::endl;
 
     // Compute the R-function and its gradient and hessian
     std::vector<std::vector<double>> N0N0Outer = VectorOuterProduct(NormalVectorTildeList[0], NormalVectorTildeList[0]);

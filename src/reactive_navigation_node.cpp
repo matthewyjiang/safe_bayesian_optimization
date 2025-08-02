@@ -31,38 +31,30 @@ public:
       : Node("reactive_navigation_node"), tf_buffer_(this->get_clock()),
         tf_listener_(tf_buffer_) {
     // Declare reactive planner parameters
-    this->declare_parameter("reactive_planner.p", 2.0);
-    this->declare_parameter("reactive_planner.epsilon", 20.0);
-    this->declare_parameter("reactive_planner.varepsilon", 0.05);
-    this->declare_parameter("reactive_planner.mu_1", 1.0);
-    this->declare_parameter("reactive_planner.mu_2", 0.15);
-    this->declare_parameter("reactive_planner.robot_radius", 0.3);
-    this->declare_parameter("reactive_planner.linear_gain", 1.0);
-    this->declare_parameter("reactive_planner.angular_gain", 1.0);
-    this->declare_parameter("reactive_planner.linear_cmd_limit", 0.5);
-    this->declare_parameter("reactive_planner.angular_cmd_limit", 1.0);
-    this->declare_parameter("reactive_planner.goal_tolerance", 0.1);
+    this->declare_parameter("p", 2.0);
+    this->declare_parameter("epsilon", 20.0);
+    this->declare_parameter("varepsilon", 0.05);
+    this->declare_parameter("mu_1", 1.0);
+    this->declare_parameter("mu_2", 0.15);
+    this->declare_parameter("robot_radius", 0.3);
+    this->declare_parameter("linear_gain", 1.0);
+    this->declare_parameter("angular_gain", 1.0);
+    this->declare_parameter("linear_cmd_limit", 0.5);
+    this->declare_parameter("angular_cmd_limit", 1.0);
+    this->declare_parameter("goal_tolerance", 0.1);
 
     // Read parameters and configure diffeomorphism parameters
-    double p = this->get_parameter("reactive_planner.p").as_double();
-    double epsilon =
-        this->get_parameter("reactive_planner.epsilon").as_double();
-    double varepsilon =
-        this->get_parameter("reactive_planner.varepsilon").as_double();
-    double mu_1 = this->get_parameter("reactive_planner.mu_1").as_double();
-    double mu_2 = this->get_parameter("reactive_planner.mu_2").as_double();
-    robot_radius_ =
-        this->get_parameter("reactive_planner.robot_radius").as_double();
-    linear_gain_ =
-        this->get_parameter("reactive_planner.linear_gain").as_double();
-    angular_gain_ =
-        this->get_parameter("reactive_planner.angular_gain").as_double();
-    linear_cmd_limit_ =
-        this->get_parameter("reactive_planner.linear_cmd_limit").as_double();
-    angular_cmd_limit_ =
-        this->get_parameter("reactive_planner.angular_cmd_limit").as_double();
-    goal_tolerance_ =
-        this->get_parameter("reactive_planner.goal_tolerance").as_double();
+    double p = this->get_parameter("p").as_double();
+    double epsilon = this->get_parameter("epsilon").as_double();
+    double varepsilon = this->get_parameter("varepsilon").as_double();
+    double mu_1 = this->get_parameter("mu_1").as_double();
+    double mu_2 = this->get_parameter("mu_2").as_double();
+    robot_radius_ = this->get_parameter("robot_radius").as_double();
+    linear_gain_ = this->get_parameter("linear_gain").as_double();
+    angular_gain_ = this->get_parameter("angular_gain").as_double();
+    linear_cmd_limit_ = this->get_parameter("linear_cmd_limit").as_double();
+    angular_cmd_limit_ = this->get_parameter("angular_cmd_limit").as_double();
+    goal_tolerance_ = this->get_parameter("goal_tolerance").as_double();
 
     // Set default workspace (will be updated when envelope is received)
     std::vector<std::vector<double>> default_workspace = {
@@ -397,9 +389,8 @@ private:
       std::vector<PolygonClass> tree;
       RCLCPP_INFO(this->get_logger(),
                   "Converting clipped polygon to diffeomorphism tree");
-      diffeoTreeConvex(
-          BoostPointToStd(BoostPolyToBoostPoint(clipped_poly)), diffeo_params_,
-          &tree);
+      diffeoTreeConvex(BoostPointToStd(BoostPolyToBoostPoint(clipped_poly)),
+                       diffeo_params_, &tree);
       diffeo_tree_array_.push_back(tree);
     }
 
@@ -483,12 +474,13 @@ private:
     std::vector<double> robot_position = {current_position_.x,
                                           current_position_.y};
 
-
     // print the size of the diffeo tree array
-    RCLCPP_INFO(this->get_logger(), "Diffeo tree array size: %zu", diffeo_tree_array_.size());
+    RCLCPP_INFO(this->get_logger(), "Diffeo tree array size: %zu",
+                diffeo_tree_array_.size());
 
-    DiffeoTransformResult transform_result = computeDiffeoTransform(
-        robot_position, current_yaw_, diffeo_tree_array_, diffeo_params_, this->get_logger());
+    DiffeoTransformResult transform_result =
+        computeDiffeoTransform(robot_position, current_yaw_, diffeo_tree_array_,
+                               diffeo_params_, this->get_logger());
 
     // Publish transformed position marker for visualization
     publish_transformed_position_marker(transform_result.transformed_position);
@@ -523,7 +515,9 @@ private:
     polygon local_workspace_polygon = compute_local_workspace_polygon(
         transform_result.transformed_position, model_obstacle_centers,
         model_obstacle_radii);
-    RCLCPP_INFO(this->get_logger(), "transformed_position=(%.3f, %.3f)", transform_result.transformed_position[0], transform_result.transformed_position[1]);
+    RCLCPP_INFO(this->get_logger(), "transformed_position=(%.3f, %.3f)",
+                transform_result.transformed_position[0],
+                transform_result.transformed_position[1]);
 
     polygon local_free_space_polygon;
     if (local_workspace_polygon.outer().size() < 3) {
@@ -647,50 +641,55 @@ private:
 
     Eigen::Matrix2d jacobian;
     jacobian << transform_result.transformed_jacobian[0][0],
-                transform_result.transformed_jacobian[0][1],
-                transform_result.transformed_jacobian[1][0],
-                transform_result.transformed_jacobian[1][1];
-    
+        transform_result.transformed_jacobian[0][1],
+        transform_result.transformed_jacobian[1][0],
+        transform_result.transformed_jacobian[1][1];
+
     // Pretty print the Jacobian matrix
     RCLCPP_INFO(this->get_logger(),
                 "Jacobian matrix:\n"
                 "  [%8.4f  %8.4f]\n"
                 "  [%8.4f  %8.4f]",
-                jacobian(0,0), jacobian(0,1),
-                jacobian(1,0), jacobian(1,1));
-    
+                jacobian(0, 0), jacobian(0, 1), jacobian(1, 0), jacobian(1, 1));
+
     // Compute the inverse Jacobian
     Eigen::Matrix2d jacobian_inv = jacobian.inverse();
-    
+
     // Pretty print the inverse Jacobian matrix
     RCLCPP_INFO(this->get_logger(),
                 "Inverse Jacobian matrix:\n"
                 "  [%8.4f  %8.4f]\n"
                 "  [%8.4f  %8.4f]",
-                jacobian_inv(0,0), jacobian_inv(0,1),
-                jacobian_inv(1,0), jacobian_inv(1,1));
-    
+                jacobian_inv(0, 0), jacobian_inv(0, 1), jacobian_inv(1, 0),
+                jacobian_inv(1, 1));
+
     // Calculate determinant for additional debugging
     double det = jacobian.determinant();
     RCLCPP_INFO(this->get_logger(), "Jacobian determinant: %.6f", det);
-    
+
     if (std::abs(det) < 1e-6) {
-        RCLCPP_WARN(this->get_logger(), "WARNING: Jacobian is near-singular (det=%.6f)!", det);
+      RCLCPP_WARN(this->get_logger(),
+                  "WARNING: Jacobian is near-singular (det=%.6f)!", det);
     }
 
-    // Transform velocity back to original coordinate space using inverse Jacobian
-    auto transformed_velocity = jacobian_inv * Eigen::Vector2d(robot_vel_x, robot_vel_y);
-    
+    // Transform velocity back to original coordinate space using inverse
+    // Jacobian
+    auto transformed_velocity =
+        jacobian_inv * Eigen::Vector2d(robot_vel_x, robot_vel_y);
 
-    RCLCPP_INFO(this->get_logger(),
-                "Velocity transformation: original=(%.3f,%.3f), transformed=(%.3f,%.3f), local_goal=(%.3f,%.3f), distance_to_subgoal=(%.3f, %.3f), current_position=(%.3f, %.3f)",
-                robot_vel_x, robot_vel_y, transformed_velocity[0], transformed_velocity[1],
-                local_goal.get<0>(), local_goal.get<1>(),
-                sqrt(pow(local_goal.get<0>() - transform_result.transformed_position[0], 2)),
-                sqrt(pow(local_goal.get<1>() - transform_result.transformed_position[1], 2)),
-                transform_result.transformed_position[0],
-                transform_result.transformed_position[1]);
-        
+    RCLCPP_INFO(
+        this->get_logger(),
+        "Velocity transformation: original=(%.3f,%.3f), "
+        "transformed=(%.3f,%.3f), local_goal=(%.3f,%.3f), "
+        "distance_to_subgoal=(%.3f, %.3f), current_position=(%.3f, %.3f)",
+        robot_vel_x, robot_vel_y, transformed_velocity[0],
+        transformed_velocity[1], local_goal.get<0>(), local_goal.get<1>(),
+        sqrt(pow(local_goal.get<0>() - transform_result.transformed_position[0],
+                 2)),
+        sqrt(pow(local_goal.get<1>() - transform_result.transformed_position[1],
+                 2)),
+        transform_result.transformed_position[0],
+        transform_result.transformed_position[1]);
 
     // Check if robot is within goal tolerance of subgoal
     double distance_to_subgoal =
@@ -725,25 +724,28 @@ private:
       // double desired_vel_x = robot_vel_x * linear_gain_;
       // double desired_vel_y = robot_vel_y * linear_gain_;
       // Calculate the magnitude of the desired velocity
-      double desired_vel_magnitude = std::sqrt(desired_vel_x * desired_vel_x + desired_vel_y * desired_vel_y);
-      
+      double desired_vel_magnitude = std::sqrt(desired_vel_x * desired_vel_x +
+                                               desired_vel_y * desired_vel_y);
+
       // Normalize to linear command limit if necessary
       if (desired_vel_magnitude > linear_cmd_limit_) {
         double scale_factor = linear_cmd_limit_ / desired_vel_magnitude;
         cmd_vel.linear.x = desired_vel_x * scale_factor;
         cmd_vel.linear.y = desired_vel_y * scale_factor;
         RCLCPP_INFO(this->get_logger(),
-                    "Velocity vector normalized: desired_mag=%.3f, limited_mag=%.3f, scale=%.3f",
+                    "Velocity vector normalized: desired_mag=%.3f, "
+                    "limited_mag=%.3f, scale=%.3f",
                     desired_vel_magnitude, linear_cmd_limit_, scale_factor);
       } else {
         cmd_vel.linear.x = desired_vel_x;
         cmd_vel.linear.y = desired_vel_y;
       }
-      
+
       RCLCPP_INFO(this->get_logger(),
                   "Velocity vector: x=%.3f, y=%.3f, magnitude=%.3f",
-                  cmd_vel.linear.x, cmd_vel.linear.y, 
-                  std::sqrt(cmd_vel.linear.x * cmd_vel.linear.x + cmd_vel.linear.y * cmd_vel.linear.y));
+                  cmd_vel.linear.x, cmd_vel.linear.y,
+                  std::sqrt(cmd_vel.linear.x * cmd_vel.linear.x +
+                            cmd_vel.linear.y * cmd_vel.linear.y));
     }
 
     cmd_vel_pub_->publish(cmd_vel);
@@ -753,18 +755,31 @@ private:
                 cmd_vel.linear.x, cmd_vel.angular.z);
   }
 
-  polygon compute_robot_voronoi_cell(const point& robot_pos, const std::vector<point>& obstacle_centers) {
+  polygon
+  compute_robot_voronoi_cell(const point &robot_pos,
+                             const std::vector<point> &obstacle_centers) {
     // Start with the environment boundary as initial polygon
     polygon result_polygon;
-    bg::append(result_polygon.outer(), bg::model::point<double, 2, bg::cs::cartesian>(env_x_min_, env_y_min_));
-    bg::append(result_polygon.outer(), bg::model::point<double, 2, bg::cs::cartesian>(env_x_max_, env_y_min_));
-    bg::append(result_polygon.outer(), bg::model::point<double, 2, bg::cs::cartesian>(env_x_max_, env_y_max_));
-    bg::append(result_polygon.outer(), bg::model::point<double, 2, bg::cs::cartesian>(env_x_min_, env_y_max_));
-    bg::append(result_polygon.outer(), bg::model::point<double, 2, bg::cs::cartesian>(env_x_min_, env_y_min_)); // Close polygon
+    bg::append(
+        result_polygon.outer(),
+        bg::model::point<double, 2, bg::cs::cartesian>(env_x_min_, env_y_min_));
+    bg::append(
+        result_polygon.outer(),
+        bg::model::point<double, 2, bg::cs::cartesian>(env_x_max_, env_y_min_));
+    bg::append(
+        result_polygon.outer(),
+        bg::model::point<double, 2, bg::cs::cartesian>(env_x_max_, env_y_max_));
+    bg::append(
+        result_polygon.outer(),
+        bg::model::point<double, 2, bg::cs::cartesian>(env_x_min_, env_y_max_));
+    bg::append(result_polygon.outer(),
+               bg::model::point<double, 2, bg::cs::cartesian>(
+                   env_x_min_, env_y_min_)); // Close polygon
     bg::correct(result_polygon);
-    
-    // For each obstacle center, clip the polygon with the half-plane closer to robot
-    for (const auto& obstacle_center : obstacle_centers) {
+
+    // For each obstacle center, clip the polygon with the half-plane closer to
+    // robot
+    for (const auto &obstacle_center : obstacle_centers) {
       // Skip if obstacle is at robot position
       double dx = obstacle_center.get<0>() - robot_pos.get<0>();
       double dy = obstacle_center.get<1>() - robot_pos.get<1>();
@@ -772,44 +787,44 @@ private:
       if (dist_sq < 1e-9) {
         continue;
       }
-      
+
       // Perpendicular bisector: points equidistant from robot and obstacle
-      // The half-plane closer to robot is where: distance_to_robot < distance_to_obstacle
-      // This is equivalent to: (x-rx)² + (y-ry)² < (x-ox)² + (y-oy)²
-      // Simplifying: 2*(ox-rx)*x + 2*(oy-ry)*y < ox²+oy²-rx²-ry²
-      
+      // The half-plane closer to robot is where: distance_to_robot <
+      // distance_to_obstacle This is equivalent to: (x-rx)² + (y-ry)² < (x-ox)²
+      // + (y-oy)² Simplifying: 2*(ox-rx)*x + 2*(oy-ry)*y < ox²+oy²-rx²-ry²
+
       double rx = robot_pos.get<0>();
       double ry = robot_pos.get<1>();
       double ox = obstacle_center.get<0>();
       double oy = obstacle_center.get<1>();
-      
+
       // Create a large polygon representing the half-plane closer to robot
       // Half-plane: 2*(ox-rx)*x + 2*(oy-ry)*y < ox²+oy²-rx²-ry²
       double a = 2.0 * (ox - rx);
       double b = 2.0 * (oy - ry);
-      double c = ox*ox + oy*oy - rx*rx - ry*ry;
-      
-      // Create a large rectangle and keep only points satisfying the half-plane constraint
+      double c = ox * ox + oy * oy - rx * rx - ry * ry;
+
+      // Create a large rectangle and keep only points satisfying the half-plane
+      // constraint
       double extend = 1000.0;
       std::vector<std::pair<double, double>> boundary_points = {
-        {env_x_min_ - extend, env_y_min_ - extend},
-        {env_x_max_ + extend, env_y_min_ - extend},
-        {env_x_max_ + extend, env_y_max_ + extend},
-        {env_x_min_ - extend, env_y_max_ + extend}
-      };
-      
+          {env_x_min_ - extend, env_y_min_ - extend},
+          {env_x_max_ + extend, env_y_min_ - extend},
+          {env_x_max_ + extend, env_y_max_ + extend},
+          {env_x_min_ - extend, env_y_max_ + extend}};
+
       // Find which corner points satisfy the half-plane constraint
       std::vector<std::pair<double, double>> valid_points;
-      for (const auto& p : boundary_points) {
+      for (const auto &p : boundary_points) {
         if (a * p.first + b * p.second < c) { // Robot side of bisector
           valid_points.push_back(p);
         }
       }
-      
+
       // Add intersection points with boundary edges
       // Check intersection with each edge of the extended rectangle
       std::vector<std::pair<double, double>> intersections;
-      
+
       // Bottom edge: y = env_y_min_ - extend
       if (std::abs(b) > 1e-9) {
         double y = env_y_min_ - extend;
@@ -818,7 +833,7 @@ private:
           intersections.push_back({x, y});
         }
       }
-      
+
       // Top edge: y = env_y_max_ + extend
       if (std::abs(b) > 1e-9) {
         double y = env_y_max_ + extend;
@@ -827,7 +842,7 @@ private:
           intersections.push_back({x, y});
         }
       }
-      
+
       // Left edge: x = env_x_min_ - extend
       if (std::abs(a) > 1e-9) {
         double x = env_x_min_ - extend;
@@ -836,7 +851,7 @@ private:
           intersections.push_back({x, y});
         }
       }
-      
+
       // Right edge: x = env_x_max_ + extend
       if (std::abs(a) > 1e-9) {
         double x = env_x_max_ + extend;
@@ -845,40 +860,46 @@ private:
           intersections.push_back({x, y});
         }
       }
-      
+
       // Combine valid corner points and intersections
-      for (const auto& intersection : intersections) {
+      for (const auto &intersection : intersections) {
         valid_points.push_back(intersection);
       }
-      
+
       // Create half-plane polygon if we have enough points
       if (valid_points.size() >= 3) {
         // Sort points counter-clockwise around centroid
         double cx = 0, cy = 0;
-        for (const auto& p : valid_points) {
+        for (const auto &p : valid_points) {
           cx += p.first;
           cy += p.second;
         }
         cx /= valid_points.size();
         cy /= valid_points.size();
-        
+
         std::sort(valid_points.begin(), valid_points.end(),
-                  [cx, cy](const std::pair<double, double>& a, const std::pair<double, double>& b) {
-                    return std::atan2(a.second - cy, a.first - cx) < std::atan2(b.second - cy, b.first - cx);
+                  [cx, cy](const std::pair<double, double> &a,
+                           const std::pair<double, double> &b) {
+                    return std::atan2(a.second - cy, a.first - cx) <
+                           std::atan2(b.second - cy, b.first - cx);
                   });
-        
+
         // Create polygon
         polygon half_plane;
-        for (const auto& p : valid_points) {
-          bg::append(half_plane.outer(), bg::model::point<double, 2, bg::cs::cartesian>(p.first, p.second));
+        for (const auto &p : valid_points) {
+          bg::append(half_plane.outer(),
+                     bg::model::point<double, 2, bg::cs::cartesian>(p.first,
+                                                                    p.second));
         }
-        bg::append(half_plane.outer(), bg::model::point<double, 2, bg::cs::cartesian>(valid_points[0].first, valid_points[0].second)); // Close
+        bg::append(half_plane.outer(),
+                   bg::model::point<double, 2, bg::cs::cartesian>(
+                       valid_points[0].first, valid_points[0].second)); // Close
         bg::correct(half_plane);
-        
+
         // Intersect current result with this half-plane
         multi_polygon intersection_result;
         bg::intersection(result_polygon, half_plane, intersection_result);
-        
+
         if (!intersection_result.empty()) {
           // Find the largest intersection component
           double max_area = 0;
@@ -892,16 +913,18 @@ private:
           }
           result_polygon = intersection_result[best_idx];
         } else {
-          RCLCPP_WARN(this->get_logger(), "No intersection found with half-plane for obstacle at (%.3f, %.3f)", 
+          RCLCPP_WARN(this->get_logger(),
+                      "No intersection found with half-plane for obstacle at "
+                      "(%.3f, %.3f)",
                       obstacle_center.get<0>(), obstacle_center.get<1>());
         }
       }
     }
-    
-    RCLCPP_DEBUG(this->get_logger(), 
-                 "Computed robot Voronoi cell with %zu vertices", 
+
+    RCLCPP_DEBUG(this->get_logger(),
+                 "Computed robot Voronoi cell with %zu vertices",
                  result_polygon.outer().size());
-    
+
     return result_polygon;
   }
 
@@ -918,7 +941,7 @@ private:
     for (size_t i = 0; i < model_obstacle_centers.size(); ++i) {
       point obstacle_center = model_obstacle_centers[i];
       double obstacle_radius = model_obstacle_radii[i];
-      
+
       if (obstacle_radius > 1e-9) { // Only interpolate if radius is non-zero
         line l;
         l.push_back(obstacle_center);
@@ -935,12 +958,13 @@ private:
 
     // Publish obstacle centers markers
     publish_obstacle_centers_markers(model_obstacle_centers);
-    
+
     // Publish interpolated centers markers
     publish_interpolated_centers_markers(interpolated_obstacle_centers);
-    
+
     // Compute robot's Voronoi cell directly using half-plane intersections
-    polygon local_workspace_polygon = compute_robot_voronoi_cell(robot_position, interpolated_obstacle_centers);
+    polygon local_workspace_polygon = compute_robot_voronoi_cell(
+        robot_position, interpolated_obstacle_centers);
 
     return local_workspace_polygon;
   }
@@ -983,43 +1007,43 @@ private:
       // Find the closest point on the polygon boundary
       double min_distance = std::numeric_limits<double>::max();
       point closest_point = goal;
-      
-      const auto& ring = lfs.outer();
+
+      const auto &ring = lfs.outer();
       if (ring.size() < 3) {
         return goal; // Invalid polygon
       }
-      
+
       // Check each edge of the polygon
       for (size_t i = 0; i < ring.size() - 1; ++i) {
         point p1 = ring[i];
         point p2 = ring[i + 1];
-        
+
         // Vector from p1 to p2
         double dx = p2.get<0>() - p1.get<0>();
         double dy = p2.get<1>() - p1.get<1>();
-        
+
         // Vector from p1 to goal
         double px = goal.get<0>() - p1.get<0>();
         double py = goal.get<1>() - p1.get<1>();
-        
+
         // Project goal onto the infinite line through p1-p2
         double edge_length_sq = dx * dx + dy * dy;
         point projected_point;
-        
+
         if (edge_length_sq < 1e-9) {
           // Degenerate edge (p1 == p2), use p1
           projected_point = point(p1.get<0>(), p1.get<1>());
         } else {
           // Parameter t for projection: 0 = p1, 1 = p2
           double t = (px * dx + py * dy) / edge_length_sq;
-          
+
           // Clamp t to [0,1] to stay within the edge segment
           t = std::max(0.0, std::min(1.0, t));
-          
+
           // Compute the closest point on this edge
           projected_point = point(p1.get<0>() + t * dx, p1.get<1>() + t * dy);
         }
-        
+
         // Check if this is the closest point so far
         double distance = bg::distance(goal, projected_point);
         if (distance < min_distance) {
@@ -1027,7 +1051,7 @@ private:
           closest_point = projected_point;
         }
       }
-      
+
       return closest_point;
     }
   }
@@ -1284,7 +1308,8 @@ private:
     local_goal_marker_pub_->publish(marker);
   }
 
-  void publish_transformed_position_marker(const std::vector<double> &transformed_position) {
+  void publish_transformed_position_marker(
+      const std::vector<double> &transformed_position) {
     auto marker = visualization_msgs::msg::Marker();
     marker.header.frame_id = "map";
     marker.header.stamp = this->get_clock()->now();
