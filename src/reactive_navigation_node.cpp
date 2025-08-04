@@ -561,135 +561,70 @@ private:
     }
 
     point subgoal_point(current_subgoal_.x, current_subgoal_.y);
-    // point local_goal_linear = compute_local_goal_linear(
-    //     robot_position_point, transform_result.transformed_orientation,
-    //     local_free_space_polygon, subgoal_point);
-    //
-    // point local_goal_angular =
-    //     compute_local_goal(local_free_space_polygon, subgoal_point);
-    //
-    // // Publish freespace markers for visualization
-    // publish_freespace_markers(local_free_space_polygon);
-    //
-    // // Compute the basis for the virtual control inputs
-    // double tV = (local_goal_linear.get<0>() -
-    //              transform_result.transformed_position[0]) *
-    //                 cos(transform_result.transformed_orientation) +
-    //             (local_goal_linear.get<1>() -
-    //              transform_result.transformed_position[1]) *
-    //                 sin(transform_result.transformed_orientation);
-    // double tW1 = (local_goal_angular.get<0>() -
-    //               transform_result.transformed_position[0]) *
-    //                  cos(transform_result.transformed_orientation) +
-    //              (local_goal_angular.get<1>() -
-    //               transform_result.transformed_position[1]) *
-    //                  sin(transform_result.transformed_orientation);
-    // double tW2 = -(local_goal_angular.get<0>() -
-    //                transform_result.transformed_position[0]) *
-    //                  sin(transform_result.transformed_orientation) +
-    //              (local_goal_angular.get<1>() -
-    //               transform_result.transformed_position[1]) *
-    //                  cos(transform_result.transformed_orientation);
-    //
-    // // Compute the basis for transforming to actual control inputs
-    //
-    // double alpha1 = transform_result.alpha1;
-    // double alpha2 = transform_result.alpha2;
-    // double beta1 = transform_result.beta1;
-    // double beta2 = transform_result.beta2;
-    //
-    // double e_norm = sqrt(pow(alpha1, 2) + pow(alpha2, 2));
-    // double dksi_dpsi =
-    //     MatrixDeterminant(transform_result.transformed_jacobian) /
-    //     pow(e_norm, 2);
-    // double DksiCosSin = (alpha1 * beta1 + alpha2 * beta2) / pow(e_norm, 2);
-    //
-    // double linear_ctl_gain, angular_ctl_gain;
-    // std::vector<double> limit_check_vector_linear = {
-    //     linear_gain_, linear_cmd_limit_ * e_norm / std::abs(tV),
-    //     0.4 * angular_cmd_limit_ * dksi_dpsi * e_norm /
-    //         std::abs(tV * DksiCosSin)};
-    // linear_ctl_gain = *std::min_element(limit_check_vector_linear.begin(),
-    //                                     limit_check_vector_linear.end());
-    // std::vector<double> limit_check_vector_angular = {
-    //     angular_gain_,
-    //     0.6 * angular_cmd_limit_ * dksi_dpsi / std::abs(std::atan2(tW2,
-    //     tW1))};
-    //
-    // angular_ctl_gain = *std::min_element(limit_check_vector_angular.begin(),
-    //                                      limit_check_vector_angular.end());
-    //
-    // // Compute virtual and actual inputs
-    // double dV_virtual = linear_ctl_gain * tV;
-    // double linear_cmd = dV_virtual / e_norm;
-    // double dW_virtual = angular_ctl_gain * std::atan2(tW2, tW1);
-    // double angular_cmd = (dW_virtual - linear_cmd * DksiCosSin) / dksi_dpsi;
+    point local_goal_linear = compute_local_goal_linear(
+        robot_position_point, transform_result.transformed_orientation,
+        local_free_space_polygon, subgoal_point);
 
-    point local_goal =
+    point local_goal_angular =
         compute_local_goal(local_free_space_polygon, subgoal_point);
 
-    // Publish local goal marker for visualization
-    publish_local_goal_marker(local_goal);
+    publish_local_goal_marker(local_goal_angular);
 
-    // double robot_vel_x =
-    //     local_goal.get<0>() - transform_result.transformed_position[0];
-    // double robot_vel_y =
-    //     local_goal.get<1>() - transform_result.transformed_position[1];
+    // Publish freespace markers for visualization
+    publish_freespace_markers(local_free_space_polygon);
 
-    double robot_vel_x = local_goal.get<0>() - current_position_.x;
-    double robot_vel_y = local_goal.get<1>() - current_position_.y;
+    // Compute the basis for the virtual control inputs
+    double tV = (local_goal_linear.get<0>() -
+                 transform_result.transformed_position[0]) *
+                    cos(transform_result.transformed_orientation) +
+                (local_goal_linear.get<1>() -
+                 transform_result.transformed_position[1]) *
+                    sin(transform_result.transformed_orientation);
+    double tW1 = (local_goal_angular.get<0>() -
+                  transform_result.transformed_position[0]) *
+                     cos(transform_result.transformed_orientation) +
+                 (local_goal_angular.get<1>() -
+                  transform_result.transformed_position[1]) *
+                     sin(transform_result.transformed_orientation);
+    double tW2 = -(local_goal_angular.get<0>() -
+                   transform_result.transformed_position[0]) *
+                     sin(transform_result.transformed_orientation) +
+                 (local_goal_angular.get<1>() -
+                  transform_result.transformed_position[1]) *
+                     cos(transform_result.transformed_orientation);
 
-    Eigen::Matrix2d jacobian;
-    jacobian << transform_result.transformed_jacobian[0][0],
-        transform_result.transformed_jacobian[0][1],
-        transform_result.transformed_jacobian[1][0],
-        transform_result.transformed_jacobian[1][1];
+    // Compute the basis for transforming to actual control inputs
 
-    // Pretty print the Jacobian matrix
-    RCLCPP_INFO(this->get_logger(),
-                "Jacobian matrix:\n"
-                "  [%8.4f  %8.4f]\n"
-                "  [%8.4f  %8.4f]",
-                jacobian(0, 0), jacobian(0, 1), jacobian(1, 0), jacobian(1, 1));
+    double alpha1 = transform_result.alpha1;
+    double alpha2 = transform_result.alpha2;
+    double beta1 = transform_result.beta1;
+    double beta2 = transform_result.beta2;
 
-    // Compute the inverse Jacobian
-    Eigen::Matrix2d jacobian_inv = jacobian.inverse();
+    double e_norm = sqrt(pow(alpha1, 2) + pow(alpha2, 2));
+    double dksi_dpsi =
+        MatrixDeterminant(transform_result.transformed_jacobian) /
+        pow(e_norm, 2);
+    double DksiCosSin = (alpha1 * beta1 + alpha2 * beta2) / pow(e_norm, 2);
 
-    // Pretty print the inverse Jacobian matrix
-    RCLCPP_INFO(this->get_logger(),
-                "Inverse Jacobian matrix:\n"
-                "  [%8.4f  %8.4f]\n"
-                "  [%8.4f  %8.4f]",
-                jacobian_inv(0, 0), jacobian_inv(0, 1), jacobian_inv(1, 0),
-                jacobian_inv(1, 1));
+    double linear_ctl_gain, angular_ctl_gain;
+    std::vector<double> limit_check_vector_linear = {
+        linear_gain_, linear_cmd_limit_ * e_norm / std::abs(tV),
+        0.4 * angular_cmd_limit_ * dksi_dpsi * e_norm /
+            std::abs(tV * DksiCosSin)};
+    linear_ctl_gain = *std::min_element(limit_check_vector_linear.begin(),
+                                        limit_check_vector_linear.end());
+    std::vector<double> limit_check_vector_angular = {
+        angular_gain_,
+        0.6 * angular_cmd_limit_ * dksi_dpsi / std::abs(std::atan2(tW2, tW1))};
 
-    // Calculate determinant for additional debugging
-    double det = jacobian.determinant();
-    RCLCPP_INFO(this->get_logger(), "Jacobian determinant: %.6f", det);
+    angular_ctl_gain = *std::min_element(limit_check_vector_angular.begin(),
+                                         limit_check_vector_angular.end());
 
-    if (std::abs(det) < 1e-6) {
-      RCLCPP_WARN(this->get_logger(),
-                  "WARNING: Jacobian is near-singular (det=%.6f)!", det);
-    }
-
-    // Transform velocity back to original coordinate space using inverse
-    // Jacobian
-    auto transformed_velocity =
-        jacobian_inv * Eigen::Vector2d(robot_vel_x, robot_vel_y);
-
-    RCLCPP_INFO(
-        this->get_logger(),
-        "Velocity transformation: original=(%.3f,%.3f), "
-        "transformed=(%.3f,%.3f), local_goal=(%.3f,%.3f), "
-        "distance_to_subgoal=(%.3f, %.3f), current_position=(%.3f, %.3f)",
-        robot_vel_x, robot_vel_y, transformed_velocity[0],
-        transformed_velocity[1], local_goal.get<0>(), local_goal.get<1>(),
-        sqrt(pow(local_goal.get<0>() - transform_result.transformed_position[0],
-                 2)),
-        sqrt(pow(local_goal.get<1>() - transform_result.transformed_position[1],
-                 2)),
-        transform_result.transformed_position[0],
-        transform_result.transformed_position[1]);
+    // Compute virtual and actual inputs
+    double dV_virtual = linear_ctl_gain * tV;
+    double linear_cmd = dV_virtual / e_norm;
+    double dW_virtual = angular_ctl_gain * std::atan2(tW2, tW1);
+    double angular_cmd = (dW_virtual - linear_cmd * DksiCosSin) / dksi_dpsi;
 
     // Check if robot is within goal tolerance of subgoal
     double distance_to_subgoal =
@@ -709,38 +644,10 @@ private:
                   distance_to_subgoal, goal_tolerance_);
     } else {
       // Normal control commands
-      // cmd_vel.linear.x =
-      //     std::max(-linear_cmd_limit_, std::min(linear_cmd,
-      //     linear_cmd_limit_));
-      // cmd_vel.angular.z = std::max(-angular_cmd_limit_,
-      //                              std::min(angular_cmd,
-      //                              angular_cmd_limit_));
-      //
-      // use only linear command limit for now
-      //
-      // Calculate the desired velocity vector
-      double desired_vel_x = transformed_velocity[0] * linear_gain_;
-      double desired_vel_y = transformed_velocity[1] * linear_gain_;
-      // double desired_vel_x = robot_vel_x * linear_gain_;
-      // double desired_vel_y = robot_vel_y * linear_gain_;
-      // Calculate the magnitude of the desired velocity
-      double desired_vel_magnitude = std::sqrt(desired_vel_x * desired_vel_x +
-                                               desired_vel_y * desired_vel_y);
-
-      // Normalize to linear command limit if necessary
-      if (desired_vel_magnitude > linear_cmd_limit_) {
-        double scale_factor = linear_cmd_limit_ / desired_vel_magnitude;
-        cmd_vel.linear.x = desired_vel_x * scale_factor;
-        cmd_vel.linear.y = desired_vel_y * scale_factor;
-        RCLCPP_INFO(this->get_logger(),
-                    "Velocity vector normalized: desired_mag=%.3f, "
-                    "limited_mag=%.3f, scale=%.3f",
-                    desired_vel_magnitude, linear_cmd_limit_, scale_factor);
-      } else {
-        cmd_vel.linear.x = desired_vel_x;
-        cmd_vel.linear.y = desired_vel_y;
-      }
-
+      cmd_vel.linear.x =
+          std::max(-linear_cmd_limit_, std::min(linear_cmd, linear_cmd_limit_));
+      cmd_vel.angular.z = std::max(-angular_cmd_limit_,
+                                   std::min(angular_cmd, angular_cmd_limit_));
       RCLCPP_INFO(this->get_logger(),
                   "Velocity vector: x=%.3f, y=%.3f, magnitude=%.3f",
                   cmd_vel.linear.x, cmd_vel.linear.y,
