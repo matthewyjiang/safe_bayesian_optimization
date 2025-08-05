@@ -22,7 +22,7 @@
 #include <cmath>
 #include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/msg/point.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
+#include <geometry_msgs/msg/point_stamped.hpp>
 #include <geometry_msgs/msg/polygon.hpp>
 #include <limits>
 #include <memory>
@@ -76,7 +76,7 @@ public:
         "get_terrain_map_with_uncertainty");
 
     // Create subscriber
-    goal_point_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+    goal_point_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
         "goal_point", 10,
         std::bind(&OptimizerNode::goal_point_callback, this,
                   std::placeholders::_1));
@@ -137,7 +137,7 @@ private:
   rclcpp::Client<trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>::
       SharedPtr terrain_map_client_;
   rclcpp::TimerBase::SharedPtr spatial_data_timer_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_point_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr goal_point_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr current_subgoal_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr
       subgoal_marker_pub_;
@@ -160,7 +160,7 @@ private:
   int terrain_height_cells_;
 
   // Current goal point
-  geometry_msgs::msg::PoseStamped current_goal_;
+  geometry_msgs::msg::PointStamped current_goal_;
 
   // Store eroded concave polygon for subgoal projection
   bg::model::polygon<bg::model::d2::point_xy<double>> eroded_concave_polygon_;
@@ -286,7 +286,7 @@ private:
     }
 
     const Eigen::VectorXd goal_eigen =
-        (Eigen::VectorXd(2) << current_goal_.pose.position.x, current_goal_.pose.position.y).finished();
+        (Eigen::VectorXd(2) << current_goal_.point.x, current_goal_.point.y).finished();
     const Eigen::VectorXd distances =
         (frontier_points.rowwise() - goal_eigen.transpose()).rowwise().norm();
 
@@ -408,14 +408,14 @@ private:
 
     // Check if the goal itself is safe by checking if it's within the eroded
     // polygon
-    bg::model::d2::point_xy<double> goal_point(current_goal_.pose.position.x,
-                                               current_goal_.pose.position.y);
+    bg::model::d2::point_xy<double> goal_point(current_goal_.point.x,
+                                               current_goal_.point.y);
 
     geometry_msgs::msg::Point subgoal;
     if (bg::within(goal_point, eroded_concave_polygon_)) {
       // Goal is safe, use it directly as the subgoal
-      subgoal.x = current_goal_.pose.position.x;
-      subgoal.y = current_goal_.pose.position.y;
+      subgoal.x = current_goal_.point.x;
+      subgoal.y = current_goal_.point.y;
       subgoal.z = 0.0;
 
       RCLCPP_INFO(
@@ -462,7 +462,7 @@ private:
         subgoal.z = 0.0;
 
         // Publish visualization of the projection
-        publish_projected_goal_marker(current_goal_.pose.position, subgoal, projection_result.dist);
+        publish_projected_goal_marker(current_goal_.point, subgoal, projection_result.dist);
 
         RCLCPP_INFO(this->get_logger(),
                     "Published projected subgoal: (%f, %f) (distance: %f)",
@@ -775,8 +775,8 @@ private:
     }
 
     // // Draw current goal in magenta if available
-    // if (current_goal_.pose.position.x != 0.0 || current_goal_.pose.position.y != 0.0) {
-    //   cv::Point goal_img = world_to_image(current_goal_.pose.position.x, current_goal_.pose.position.y);
+    // if (current_goal_.point.x != 0.0 || current_goal_.point.y != 0.0) {
+    //   cv::Point goal_img = world_to_image(current_goal_.point.x, current_goal_.point.y);
     //   if (goal_img.x >= 0 && goal_img.x < img_width &&
     //       goal_img.y >= 0 && goal_img.y < img_height) {
     //     cv::circle(debug_img, goal_img, 8, cv::Scalar(255, 0, 255), -1);
@@ -805,8 +805,8 @@ private:
     RCLCPP_DEBUG(this->get_logger(), "Published debug visualization image");
   }
 
-  void goal_point_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg) {
-    current_goal_ = *msg;
+  void goal_point_callback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
+    current_goal_.point = msg->point;
   }
 
   void publish_subgoal_marker(const geometry_msgs::msg::Point &subgoal) {
