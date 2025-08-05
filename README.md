@@ -78,7 +78,7 @@ Parameters can be configured in:
 - `p`: Diffeomorphism parameter
 - `epsilon`: Smoothness parameter
 - `varepsilon`: Small perturbation parameter
-- `mu_1`, `reactive_planner.mu_2`: Scaling parameters
+- `mu_1`, `mu_2`: Scaling parameters
 - `robot_radius`: Robot collision radius
 - `linear_gain`: Linear velocity gain
 - `angular_gain`: Angular velocity gain
