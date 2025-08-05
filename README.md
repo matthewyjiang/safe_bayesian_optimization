@@ -21,6 +21,9 @@ colcon build --cmake-args -DBUILD_EXAMPLES=OFF
 - **Terrain Mapping Integration**: Connects with terrain mapping services for real-time updates
 - **Debug Visualization**: Integrated debug image publishing for development and testing
 - **ROS 2 Native**: Built for ROS 2 with standard message interfaces
+- **Alpha Shape Processing**: CGAL alpha shapes for concave hull generation
+- **Voronoi-Based Navigation**: MyGAL library for free space computation
+- **Foxglove Integration**: Real-time visualization support
 
 ## Nodes
 
@@ -39,7 +42,9 @@ colcon build --cmake-args -DBUILD_EXAMPLES=OFF
 - **Eigen3**: Linear algebra operations for bayesian optimization
 - **OpenCV**: For finding contours on safe set 
 - **Boost**: Geometry operations
-- **CGAL**: Computational geometry algorithms - alphashape
+- **CGAL**: Computational geometry algorithms - alpha shapes
+- **Qhull**: Convex hull computation
+- **Qt5**: GUI components
 
 ### ROS 2 Packages
 - **Standard ROS 2 Packages**:
@@ -106,6 +111,14 @@ Parameters can be configured in:
 #### goal_point_publisher
 - `/goal_point` (`geometry_msgs/Point`) - Test goal points for navigation
 - `/goal_marker` (`visualization_msgs/Marker`) - Goal point visualization marker
+
+#### Additional System Nodes
+- **visualizer** (`foxglove_visualization`) - Real-time visualization interface
+- **leg_measurements_publisher** (`foxglove_visualization`) - Leg sensor data publishing
+- **fake_data_publisher** (`foxglove_visualization`) - Test data generation
+- **data_collector** (`mapping_collector`) - Sensor data collection
+- **terrain_mapping_node** (`mapping_package`) - Terrain map generation
+- **turtlesim_node** (`turtlesim`) - Robot simulation environment
 
 ### Subscribed Topics
 
