@@ -43,8 +43,6 @@ colcon build --cmake-args -DBUILD_EXAMPLES=OFF
 - **OpenCV**: For finding contours on safe set 
 - **Boost**: Geometry operations
 - **CGAL**: Computational geometry algorithms - alpha shapes
-- **Qhull**: Convex hull computation
-- **Qt5**: GUI components
 
 ### ROS 2 Packages
 - **Standard ROS 2 Packages**:
@@ -60,9 +58,6 @@ colcon build --cmake-args -DBUILD_EXAMPLES=OFF
 
 ### Custom Interfaces
 - **`trusses_custom_interfaces`**: Custom service definitions for spatial data and terrain mapping
-
-### External Dependencies (Fetched)
-- **MyGAL**: Voronoi diagram generation library (fetched from GitHub)
 
 ## Usage
 
@@ -80,16 +75,16 @@ Parameters can be configured in:
 - `terrain_map.*`: Terrain map dimensions and resolution
 
 ### `config/reactive_planner.yaml`:
-- `reactive_planner.p`: Diffeomorphism parameter
-- `reactive_planner.epsilon`: Smoothness parameter
-- `reactive_planner.varepsilon`: Small perturbation parameter
-- `reactive_planner.mu_1`, `reactive_planner.mu_2`: Scaling parameters
-- `reactive_planner.robot_radius`: Robot collision radius
-- `reactive_planner.linear_gain`: Linear velocity gain
-- `reactive_planner.angular_gain`: Angular velocity gain
-- `reactive_planner.linear_cmd_limit`: Maximum linear velocity command
-- `reactive_planner.angular_cmd_limit`: Maximum angular velocity command
-- `reactive_planner.goal_tolerance`: Distance tolerance to stop near subgoal
+- `p`: Diffeomorphism parameter
+- `epsilon`: Smoothness parameter
+- `varepsilon`: Small perturbation parameter
+- `mu_1`, `reactive_planner.mu_2`: Scaling parameters
+- `robot_radius`: Robot collision radius
+- `linear_gain`: Linear velocity gain
+- `angular_gain`: Angular velocity gain
+- `linear_cmd_limit`: Maximum linear velocity command
+- `angular_cmd_limit`: Maximum angular velocity command
+- `goal_tolerance`: Distance tolerance to stop near subgoal
 
 ## Topic Interfaces
 
