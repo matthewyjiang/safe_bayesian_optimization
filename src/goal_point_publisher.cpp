@@ -1,4 +1,4 @@
-#include <geometry_msgs/msg/point.hpp>
+#include <geometry_msgs/msg/point_stamped.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 
@@ -6,7 +6,7 @@ class GoalPointPublisher : public rclcpp::Node {
 public:
   GoalPointPublisher() : Node("goal_point_publisher") {
     publisher_ =
-        this->create_publisher<geometry_msgs::msg::Point>("goal_point", 10);
+        this->create_publisher<geometry_msgs::msg::PointStamped>("goal_point", 10);
 
     marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>(
         "goal_marker", 10);
@@ -20,18 +20,20 @@ public:
 
 private:
   void publish_goal_point() {
-    geometry_msgs::msg::Point msg;
-    msg.x = 8.0;
-    msg.y = 4.0;
-    msg.z = 0.0;
+    geometry_msgs::msg::PointStamped msg;
+    msg.header.frame_id = "map";
+    msg.header.stamp = this->get_clock()->now();
+    msg.point.x = 8.0;
+    msg.point.y = 4.0;
+    msg.point.z = 0.0;
 
     publisher_->publish(msg);
 
     // Publish goal marker for visualization
-    publish_goal_marker(msg);
+    publish_goal_marker(msg.point);
 
-    RCLCPP_INFO(this->get_logger(), "Published goal point: (%.2f, %.2f)", msg.x,
-                msg.y);
+    RCLCPP_INFO(this->get_logger(), "Published goal point: (%.2f, %.2f)", msg.point.x,
+                msg.point.y);
   }
 
   void publish_goal_marker(const geometry_msgs::msg::Point &goal) {
@@ -60,7 +62,7 @@ private:
     marker_pub_->publish(marker);
   }
 
-  rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr publisher_;
+  rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr publisher_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
 };

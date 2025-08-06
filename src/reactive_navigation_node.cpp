@@ -142,6 +142,11 @@ public:
         this->create_publisher<visualization_msgs::msg::Marker>(
             "/transformed_position_marker", 10);
 
+    // Create free space line marker publisher
+    free_space_line_marker_pub_ =
+        this->create_publisher<visualization_msgs::msg::Marker>(
+            "/free_space_line_marker", 10);
+
     // Create timer for control loop
     control_timer_ = this->create_wall_timer(
         std::chrono::milliseconds(100),
@@ -173,6 +178,8 @@ private:
       local_goal_marker_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr
       transformed_position_marker_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr
+      free_space_line_marker_pub_;
   rclcpp::TimerBase::SharedPtr control_timer_;
 
   tf2_ros::Buffer tf_buffer_;
@@ -460,12 +467,6 @@ private:
       return;
     }
 
-    if (obstacle_polygons_.empty()) {
-      RCLCPP_INFO(this->get_logger(),
-                  "No obstacles detected, skipping control");
-      return;
-    }
-
     geometry_msgs::msg::Twist cmd_vel;
     cmd_vel.linear.x = 0.0;
     cmd_vel.linear.y = 0.0;
@@ -666,23 +667,45 @@ private:
   compute_robot_voronoi_cell(const point &robot_pos,
                              const std::vector<point> &obstacle_centers) {
     // Start with the environment boundary as initial polygon
-    polygon result_polygon;
+    polygon env_polygon;
     bg::append(
-        result_polygon.outer(),
+        env_polygon.outer(),
         bg::model::point<double, 2, bg::cs::cartesian>(env_x_min_, env_y_min_));
     bg::append(
-        result_polygon.outer(),
+        env_polygon.outer(),
         bg::model::point<double, 2, bg::cs::cartesian>(env_x_max_, env_y_min_));
     bg::append(
-        result_polygon.outer(),
+        env_polygon.outer(),
         bg::model::point<double, 2, bg::cs::cartesian>(env_x_max_, env_y_max_));
     bg::append(
-        result_polygon.outer(),
+        env_polygon.outer(),
         bg::model::point<double, 2, bg::cs::cartesian>(env_x_min_, env_y_max_));
-    bg::append(result_polygon.outer(),
+    bg::append(env_polygon.outer(),
                bg::model::point<double, 2, bg::cs::cartesian>(
                    env_x_min_, env_y_min_)); // Close polygon
-    bg::correct(result_polygon);
+    bg::correct(env_polygon);
+
+    // Erode the environment polygon by robot radius (same as merged obstacles)
+    polygon result_polygon;
+    bg::strategy::buffer::distance_symmetric<double> distance_strategy(
+        -robot_radius_);
+    bg::strategy::buffer::join_round join_strategy;
+    bg::strategy::buffer::end_round end_strategy;
+    bg::strategy::buffer::point_circle point_strategy;
+    bg::strategy::buffer::side_straight side_strategy;
+
+    multi_polygon eroded_env_multi;
+    bg::buffer(env_polygon, eroded_env_multi, distance_strategy, side_strategy,
+               join_strategy, end_strategy, point_strategy);
+
+    // Use the eroded environment polygon if buffer operation succeeded
+    if (!eroded_env_multi.empty()) {
+      result_polygon = eroded_env_multi[0];
+    } else {
+      RCLCPP_WARN(this->get_logger(),
+                  "Environment erosion failed, using original envelope");
+      result_polygon = env_polygon;
+    }
 
     // For each obstacle center, clip the polygon with the half-plane closer to
     // robot
@@ -876,6 +899,67 @@ private:
     return local_workspace_polygon;
   }
 
+  point custom_raycast(const polygon& poly, const point& ray_start, const point& ray_direction) {
+    // Normalize the ray direction
+    double ray_length = sqrt(ray_direction.get<0>() * ray_direction.get<0>() + 
+                           ray_direction.get<1>() * ray_direction.get<1>());
+    if (ray_length < 1e-9) {
+      return ray_start;
+    }
+    
+    point normalized_dir(ray_direction.get<0>() / ray_length, 
+                        ray_direction.get<1>() / ray_length);
+    
+    // Create a very long ray segment for intersection testing
+    double max_distance = 1000.0;
+    point ray_end(ray_start.get<0>() + max_distance * normalized_dir.get<0>(),
+                  ray_start.get<1>() + max_distance * normalized_dir.get<1>());
+    
+    // Create line segment for the ray
+    bg::model::segment<point> ray_segment(ray_start, ray_end);
+    
+    // Find intersection with polygon boundary
+    double closest_distance = max_distance;
+    point closest_intersection = ray_end;
+    bool found_intersection = false;
+    
+    const auto& ring = poly.outer();
+    if (ring.size() < 3) {
+      return ray_start;
+    }
+    
+    // Check intersection with each edge of the polygon
+    for (size_t i = 0; i < ring.size() - 1; ++i) {
+      point p1 = ring[i];
+      point p2 = ring[i + 1];
+      
+      bg::model::segment<point> edge_segment(p1, p2);
+      
+      // Find intersection points between ray and edge
+      std::vector<point> intersection_points;
+      bg::intersection(ray_segment, edge_segment, intersection_points);
+      
+      // Check each intersection point
+      for (const auto& intersection : intersection_points) {
+        // Calculate distance from ray start to intersection
+        double dx = intersection.get<0>() - ray_start.get<0>();
+        double dy = intersection.get<1>() - ray_start.get<1>();
+        double distance = sqrt(dx * dx + dy * dy);
+        
+        // Check if intersection is in the positive ray direction
+        double dot_product = dx * normalized_dir.get<0>() + dy * normalized_dir.get<1>();
+        
+        if (dot_product > 1e-9 && distance < closest_distance) {
+          closest_distance = distance;
+          closest_intersection = intersection;
+          found_intersection = true;
+        }
+      }
+    }
+    
+    return found_intersection ? closest_intersection : ray_start;
+  }
+
   line compute_linear_free_space(point robot_position, double robot_orientation,
                                  polygon local_free_space_polygon) {
 
@@ -883,14 +967,45 @@ private:
     if (bg::area(local_free_space_polygon) < 0.001) {
       free_space_line.push_back(robot_position);
       free_space_line.push_back(robot_position);
-      return free_space_line;
     } else {
+      const double erosion_distance = 0.15; // Erosion distance in meters
+      
+      // Create eroded polygon using multi-polygon as intermediate
+      std::vector<polygon> eroded_multipolygon;
+      bg::strategy::buffer::distance_symmetric<double> distance_strategy(-erosion_distance);
+      bg::strategy::buffer::join_round join_strategy;
+      bg::strategy::buffer::end_round end_strategy;
+      bg::strategy::buffer::point_circle circle_strategy;
+      bg::strategy::buffer::side_straight side_strategy;
+      bg::buffer(local_free_space_polygon, eroded_multipolygon, distance_strategy, side_strategy,
+                join_strategy, end_strategy, circle_strategy);
+      
+      polygon eroded_polygon;
+      if (!eroded_multipolygon.empty()) {
+        eroded_polygon = eroded_multipolygon[0]; // Use first polygon from result
+      }
+      
+      // Determine starting point for raycast
+      point raycast_start = robot_position;
+      
+      // If robot is outside eroded polygon, project it onto eroded polygon boundary
+      if (!eroded_polygon.outer().empty() && !bg::within(robot_position, eroded_polygon)) {
+        if (bg::area(eroded_polygon) > 0.001) {
+          ProjectionResultStruct projection = polydist(eroded_polygon, robot_position);
+          raycast_start = projection.projected_point;
+        }
+      }
+      
       free_space_line.push_back(robot_position);
       free_space_line.push_back(
-          polyxray(local_free_space_polygon, robot_position,
-                   point(cos(robot_orientation), sin(robot_orientation))));
-      return free_space_line;
+          custom_raycast(local_free_space_polygon, raycast_start,
+                        point(cos(robot_orientation), sin(robot_orientation))));
     }
+    
+    // Publish visualization marker for the free space line
+    publish_free_space_line_marker(free_space_line);
+    
+    return free_space_line;
   }
 
   point compute_local_goal_linear(point robot_position,
@@ -1246,6 +1361,40 @@ private:
     marker.lifetime = rclcpp::Duration::from_nanoseconds(0);
 
     transformed_position_marker_pub_->publish(marker);
+  }
+
+  void publish_free_space_line_marker(const line &free_space_line) {
+    auto marker = visualization_msgs::msg::Marker();
+    marker.header.frame_id = "map";
+    marker.header.stamp = this->get_clock()->now();
+    marker.ns = "free_space_line";
+    marker.id = 0;
+    marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+    
+    // Set line properties
+    marker.pose.orientation.w = 1.0;
+    marker.scale.x = 0.05; // Line width
+    
+    // Set color (bright cyan for visibility)
+    marker.color.r = 0.0;
+    marker.color.g = 1.0;
+    marker.color.b = 1.0;
+    marker.color.a = 1.0;
+    
+    // Set lifetime (marker persists until updated)
+    marker.lifetime = rclcpp::Duration::from_nanoseconds(0);
+    
+    // Add points to the line
+    for (const auto& point : free_space_line) {
+      geometry_msgs::msg::Point p;
+      p.x = point.get<0>();
+      p.y = point.get<1>();
+      p.z = 0.05; // Slightly elevated for visibility
+      marker.points.push_back(p);
+    }
+    
+    free_space_line_marker_pub_->publish(marker);
   }
 };
 

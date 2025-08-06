@@ -3,7 +3,7 @@
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
-from turtlesim.msg import Pose
+from geometry_msgs.msg import Pose
 from trusses_custom_interfaces.msg import SpatialMeasurement
 import math
 import time
@@ -15,7 +15,7 @@ import os
 class TurtlesimSpatialPublisher(Node):
     
     def __init__(self):
-        super().__init__('turtlesim_spatial_publisher')
+        super().__init__('spirit_spatial_publisher')
         
         # Load terrain data
         self.load_terrain_data()
@@ -23,14 +23,14 @@ class TurtlesimSpatialPublisher(Node):
         # Publisher for spatial measurements
         self.spatial_pub = self.create_publisher(
             SpatialMeasurement, 
-            '/spatial_measurements', 
+            'spirit/spatial_measurements', 
             10
         )
         
-        # Subscriber to turtlesim pose
+        # Subscriber to spirit pose
         self.pose_sub = self.create_subscription(
             Pose,
-            '/turtle1/pose',
+            'spirit/current_pose',
             self.pose_callback,
             10
         )
@@ -42,7 +42,7 @@ class TurtlesimSpatialPublisher(Node):
         # Timer for publishing spatial measurements
         self.timer = self.create_timer(1, self.publish_spatial_measurement)
         
-        self.get_logger().info('Turtlesim Spatial Publisher initialized')
+        self.get_logger().info('Spirit Spatial Publisher initialized')
     
     def load_terrain_data(self):
         """Load terrain data from CSV file"""
@@ -56,23 +56,30 @@ class TurtlesimSpatialPublisher(Node):
             self.terrain_data = np.loadtxt(terrain_file, delimiter=',', skiprows=1)
             self.get_logger().info(f'Loaded terrain data with shape: {self.terrain_data.shape}')
             
-            # Define terrain grid bounds (assuming turtlesim world is 11x11, terrain data covers this)
+            # Terrain data shape and scaling factor
             self.terrain_rows, self.terrain_cols = self.terrain_data.shape
-            self.x_min, self.x_max = 0.0, 11.0
-            self.y_min, self.y_max = 0.0, 11.0
+            self.scale_factor = 10
+            
+            # Terrain coordinate bounds (centered around 0,0)
+            self.terrain_x_min, self.terrain_x_max = -float(self.terrain_cols)/2, float(self.terrain_cols)/2
+            self.terrain_y_min, self.terrain_y_max = -float(self.terrain_rows)/2, float(self.terrain_rows)/2
             
         except Exception as e:
             self.get_logger().error(f'Failed to load terrain data: {e}')
             self.terrain_data = None
     
     def get_terrain_value(self, x, y):
-        """Get terrain value at given x, y coordinates"""
+        """Get terrain value at given x, y coordinates with scaling"""
         if self.terrain_data is None:
             return 100.0  # Default value
         
-        # Convert world coordinates to array indices
-        col = int((x - self.x_min) / (self.x_max - self.x_min) * (self.terrain_cols - 1))
-        row = int((y - self.y_min) / (self.y_max - self.y_min) * (self.terrain_rows - 1))
+        # Scale pose coordinates up by scale_factor to map to terrain coordinates
+        terrain_x = x * self.scale_factor
+        terrain_y = y * self.scale_factor
+        
+        # Convert terrain coordinates to array indices
+        col = int((terrain_x - self.terrain_x_min) / (self.terrain_x_max - self.terrain_x_min) * (self.terrain_cols - 1))
+        row = int((terrain_y - self.terrain_y_min) / (self.terrain_y_max - self.terrain_y_min) * (self.terrain_rows - 1))
         
         # Clamp to valid indices
         col = max(0, min(col, self.terrain_cols - 1))
@@ -81,7 +88,7 @@ class TurtlesimSpatialPublisher(Node):
         return float(self.terrain_data[row, col])
     
     def pose_callback(self, msg):
-        """Store the current turtle pose"""
+        """Store the current spirit pose"""
         self.current_pose = msg
         
         # Publish initial random points around robot on first pose received
@@ -94,21 +101,25 @@ class TurtlesimSpatialPublisher(Node):
         if self.current_pose is None:
             return
         
-        num_points = 10  # Number of random points to publish
-        max_distance = 2.0  # Maximum distance from robot
+        num_points = 30  # Number of random points to publish
+        max_distance = 2  # Maximum distance from robot
         
         for i in range(num_points):
             # Generate random point in vicinity of robot
             angle = random.uniform(0, 2 * math.pi)
-            distance = random.uniform(0.5, max_distance)
+            distance = random.uniform(0.0, max_distance)
             
             # Calculate random point coordinates
-            x = self.current_pose.x + distance * math.cos(angle)
-            y = self.current_pose.y + distance * math.sin(angle)
+            x = self.current_pose.position.x + distance * math.cos(angle)
+            y = self.current_pose.position.y + distance * math.sin(angle)
             
-            # Ensure point is within turtlesim bounds (0-11)
-            x = max(0.1, min(10.9, x))
-            y = max(0.1, min(10.9, y))
+            # Keep points within reasonable bounds for pose coordinates
+            min_x = self.terrain_x_min / self.scale_factor + 0.1
+            max_x = self.terrain_x_max / self.scale_factor - 0.1
+            min_y = self.terrain_y_min / self.scale_factor + 0.1
+            max_y = self.terrain_y_max / self.scale_factor - 0.1
+            x = max(min_x, min(max_x, x))
+            y = max(min_y, min(max_y, y))
             
             # Create and publish spatial measurement
             spatial_msg = SpatialMeasurement()
@@ -117,8 +128,8 @@ class TurtlesimSpatialPublisher(Node):
             spatial_msg.position.z = 0.0
             spatial_msg.value = self.get_terrain_value(x, y)
             spatial_msg.unit = 'm'
-            spatial_msg.source_name = 'turtlesim_init'
-            spatial_msg.uncertainty = 3.0  # Lower uncertainty for initial points
+            spatial_msg.source_name = 'spirit_init'
+            spatial_msg.uncertainty = 0.0  # Lower uncertainty for initial points
             spatial_msg.time = self.get_clock().now().to_msg()
             
             self.spatial_pub.publish(spatial_msg)
@@ -133,21 +144,19 @@ class TurtlesimSpatialPublisher(Node):
         # Create spatial measurement message
         spatial_msg = SpatialMeasurement()
         
-        # Set position from turtle pose
-        spatial_msg.position.x = self.current_pose.x
-        spatial_msg.position.y = self.current_pose.y
-        spatial_msg.position.z = 0.0  # Turtlesim is 2D
+        # Set position from spirit pose
+        spatial_msg.position.x = self.current_pose.position.x
+        spatial_msg.position.y = self.current_pose.position.y
+        spatial_msg.position.z = self.current_pose.position.z
         
         # Get terrain value from loaded data
-        spatial_msg.value = self.get_terrain_value(self.current_pose.x, self.current_pose.y)
+        spatial_msg.value = self.get_terrain_value(self.current_pose.position.x, self.current_pose.position.y)
         
         spatial_msg.unit = 'm'
-        spatial_msg.source_name = 'turtlesim'
-        # Add some uncertainty based on velocity and distance from known points
-        velocity_magnitude = math.sqrt(self.current_pose.linear_velocity**2 + self.current_pose.angular_velocity**2)
-        base_uncertainty = 5.0
-        velocity_uncertainty = velocity_magnitude * 2.0
-        spatial_msg.uncertainty = base_uncertainty + velocity_uncertainty
+        spatial_msg.source_name = 'spirit'
+        # Add base uncertainty (spirit pose doesn't have velocity info in geometry_msgs/Pose)
+        base_uncertainty = 0.0
+        spatial_msg.uncertainty = base_uncertainty
         
         
         # Set timestamp
@@ -157,7 +166,7 @@ class TurtlesimSpatialPublisher(Node):
         self.spatial_pub.publish(spatial_msg)
         
         self.get_logger().info(
-            f'Published spatial measurement: pos=({self.current_pose.x:.2f}, {self.current_pose.y:.2f}), '
+            f'Published spatial measurement: pos=({self.current_pose.position.x:.2f}, {self.current_pose.position.y:.2f}), '
             f'value={spatial_msg.value:.2f}, uncertainty={spatial_msg.uncertainty:.2f}'
         )
 
