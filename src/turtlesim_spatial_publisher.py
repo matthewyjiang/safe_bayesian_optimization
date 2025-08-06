@@ -54,7 +54,13 @@ class TurtlesimSpatialPublisher(Node):
             
             # Load terrain data using numpy
             self.terrain_data = np.loadtxt(terrain_file, delimiter=',', skiprows=1)
+            
+            # Report original terrain statistics
+            orig_min = np.min(self.terrain_data)
+            orig_max = np.max(self.terrain_data)
+            orig_avg = np.mean(self.terrain_data)
             self.get_logger().info(f'Loaded terrain data with shape: {self.terrain_data.shape}')
+            self.get_logger().info(f'Original terrain stats - Min: {orig_min:.3f}, Max: {orig_max:.3f}, Average: {orig_avg:.3f}')
             
             # Terrain data shape and scaling factor
             self.terrain_rows, self.terrain_cols = self.terrain_data.shape
@@ -85,7 +91,13 @@ class TurtlesimSpatialPublisher(Node):
         col = max(0, min(col, self.terrain_cols - 1))
         row = max(0, min(row, self.terrain_rows - 1))
         
-        return float(self.terrain_data[row, col])
+        # Scale terrain values to 0-10 range
+        terrain_value = float(self.terrain_data[row, col])
+        # Normalize to 0-1 range first, then scale to 0-10
+        min_val = np.min(self.terrain_data)
+        max_val = np.max(self.terrain_data)
+        normalized = (terrain_value - min_val) / (max_val - min_val)
+        return normalized * 30.0
     
     def pose_callback(self, msg):
         """Store the current spirit pose"""

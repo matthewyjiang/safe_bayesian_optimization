@@ -27,6 +27,7 @@
 #include <limits>
 #include <memory>
 #include <opencv2/opencv.hpp>
+#include <queue>
 #include <unordered_map>
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
@@ -49,6 +50,7 @@ public:
                             std::vector<double>{0.1, 0.1});
     this->declare_parameter("debug.publish_debug_image", false);
     this->declare_parameter("opt.subgoal_erosion", 0.2);
+    this->declare_parameter("robot.radius", 0.5);
 
     // Read parameters
     beta_ = this->get_parameter("opt.beta").as_double();
@@ -66,6 +68,7 @@ public:
     publish_debug_image_ =
         this->get_parameter("debug.publish_debug_image").as_bool();
     subgoal_erosion_ = this->get_parameter("opt.subgoal_erosion").as_double();
+    robot_radius_ = this->get_parameter("robot.radius").as_double();
 
     // Create service clients
     spatial_data_client_ =
@@ -76,10 +79,11 @@ public:
         "get_terrain_map_with_uncertainty");
 
     // Create subscriber
-    goal_point_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
-        "goal_point", 10,
-        std::bind(&OptimizerNode::goal_point_callback, this,
-                  std::placeholders::_1));
+    goal_point_sub_ =
+        this->create_subscription<geometry_msgs::msg::PointStamped>(
+            "goal_point", 10,
+            std::bind(&OptimizerNode::goal_point_callback, this,
+                      std::placeholders::_1));
 
     // Create publishers
     current_subgoal_pub_ = this->create_publisher<geometry_msgs::msg::Point>(
@@ -130,6 +134,7 @@ private:
   double beta_;
   double f_min_;
   double subgoal_erosion_;
+  double robot_radius_;
 
   // Spatial data monitoring
   rclcpp::Client<trusses_custom_interfaces::srv::SpatialData>::SharedPtr
@@ -137,7 +142,8 @@ private:
   rclcpp::Client<trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>::
       SharedPtr terrain_map_client_;
   rclcpp::TimerBase::SharedPtr spatial_data_timer_;
-  rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr goal_point_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr
+      goal_point_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr current_subgoal_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr
       subgoal_marker_pub_;
@@ -164,6 +170,225 @@ private:
 
   // Store eroded concave polygon for subgoal projection
   bg::model::polygon<bg::model::d2::point_xy<double>> eroded_concave_polygon_;
+
+  // Disjoint set data structure using map
+  class DisjointSet {
+  private:
+    std::map<int, int> parent_;
+    std::map<int, int> rank_;
+
+  public:
+    void make_set(int x) {
+      if (parent_.find(x) == parent_.end()) {
+        parent_[x] = x;
+        rank_[x] = 0;
+      }
+    }
+
+    int find(int x) {
+      if (parent_[x] != x) {
+        parent_[x] = find(parent_[x]); // Path compression
+      }
+      return parent_[x];
+    }
+
+    void union_sets(int x, int y) {
+      int root_x = find(x);
+      int root_y = find(y);
+
+      if (root_x != root_y) {
+        // Union by rank
+        if (rank_[root_x] < rank_[root_y]) {
+          parent_[root_x] = root_y;
+        } else if (rank_[root_x] > rank_[root_y]) {
+          parent_[root_y] = root_x;
+        } else {
+          parent_[root_y] = root_x;
+          rank_[root_x]++;
+        }
+      }
+    }
+
+    std::vector<std::vector<int>> get_disjoint_sets() {
+      std::map<int, std::vector<int>> groups;
+      for (const auto &pair : parent_) {
+        int element = pair.first;
+        int root = find(element);
+        groups[root].push_back(element);
+      }
+
+      std::vector<std::vector<int>> result;
+      for (const auto &group : groups) {
+        result.push_back(group.second);
+      }
+      return result;
+    }
+  };
+
+  std::vector<std::vector<int>>
+  compute_disjoint_sets_direct(const std::vector<int> &safe_indices,
+                               double distance_threshold) {
+    RCLCPP_INFO(this->get_logger(),
+                "[OPTIMIZED] Using spatial grid-based disjoint set algorithm");
+
+    // Initialize DisjointSet with point indices
+    DisjointSet ds;
+    for (int idx : safe_indices) {
+      ds.make_set(idx);
+    }
+
+    // Find bounds of safe points
+    double min_x = std::numeric_limits<double>::max();
+    double max_x = std::numeric_limits<double>::lowest();
+    double min_y = std::numeric_limits<double>::max();
+    double max_y = std::numeric_limits<double>::lowest();
+    
+    for (int idx : safe_indices) {
+      min_x = std::min(min_x, D_(idx, 0));
+      max_x = std::max(max_x, D_(idx, 0));
+      min_y = std::min(min_y, D_(idx, 1));
+      max_y = std::max(max_y, D_(idx, 1));
+    }
+    
+    // Create spatial grid with cell size equal to distance threshold
+    double cell_size = distance_threshold;
+    int grid_width = static_cast<int>((max_x - min_x) / cell_size) + 1;
+    int grid_height = static_cast<int>((max_y - min_y) / cell_size) + 1;
+    
+    RCLCPP_INFO(this->get_logger(), "[OPTIMIZED] Grid size: %dx%d, cell_size: %f", 
+                grid_width, grid_height, cell_size);
+    
+    // Create grid to store point indices
+    std::vector<std::vector<std::vector<int>>> grid(grid_width, 
+        std::vector<std::vector<int>>(grid_height));
+    
+    // Insert points into grid
+    for (int idx : safe_indices) {
+      int grid_x = static_cast<int>((D_(idx, 0) - min_x) / cell_size);
+      int grid_y = static_cast<int>((D_(idx, 1) - min_y) / cell_size);
+      
+      // Clamp to grid bounds
+      grid_x = std::max(0, std::min(grid_x, grid_width - 1));
+      grid_y = std::max(0, std::min(grid_y, grid_height - 1));
+      
+      grid[grid_x][grid_y].push_back(idx);
+    }
+
+    int merge_count = 0;
+    double squared_threshold = distance_threshold * distance_threshold;
+    
+    RCLCPP_INFO(this->get_logger(), "[OPTIMIZED] Using spatial grid with threshold: %f", distance_threshold);
+    
+    // For each grid cell, check points against neighboring cells
+    for (int gx = 0; gx < grid_width; ++gx) {
+      for (int gy = 0; gy < grid_height; ++gy) {
+        if (grid[gx][gy].empty()) continue;
+        
+        // Check points within same cell
+        for (size_t i = 0; i < grid[gx][gy].size(); ++i) {
+          int idx1 = grid[gx][gy][i];
+          
+          for (size_t j = i + 1; j < grid[gx][gy].size(); ++j) {
+            int idx2 = grid[gx][gy][j];
+            
+            double dx = D_(idx1, 0) - D_(idx2, 0);
+            double dy = D_(idx1, 1) - D_(idx2, 1);
+            double squared_distance = dx * dx + dy * dy;
+            
+            if (squared_distance <= squared_threshold) {
+              ds.union_sets(idx1, idx2);
+              merge_count++;
+            }
+          }
+        }
+        
+        // Check points against neighboring cells (only check right and down neighbors to avoid duplicates)
+        for (int dx = 0; dx <= 1; ++dx) {
+          for (int dy = (dx == 0 ? 1 : -1); dy <= 1; ++dy) {
+            int nx = gx + dx;
+            int ny = gy + dy;
+            
+            if (nx >= grid_width || ny < 0 || ny >= grid_height) continue;
+            if (grid[nx][ny].empty()) continue;
+            
+            // Check all point pairs between current cell and neighbor cell
+            for (int idx1 : grid[gx][gy]) {
+              for (int idx2 : grid[nx][ny]) {
+                double dx_dist = D_(idx1, 0) - D_(idx2, 0);
+                double dy_dist = D_(idx1, 1) - D_(idx2, 1);
+                double squared_distance = dx_dist * dx_dist + dy_dist * dy_dist;
+                
+                if (squared_distance <= squared_threshold) {
+                  ds.union_sets(idx1, idx2);
+                  merge_count++;
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // Progress logging for large grids
+      if (gx % 100 == 0 && gx > 0) {
+        RCLCPP_INFO(this->get_logger(), "[OPTIMIZED] Processed %d/%d grid columns, %d merges so far", 
+                   gx, grid_width, merge_count);
+      }
+    }
+
+    RCLCPP_INFO(this->get_logger(), "[OPTIMIZED] Performed %d merge operations",
+                merge_count);
+
+    // Extract disjoint sets
+    auto components = ds.get_disjoint_sets();
+
+    RCLCPP_INFO(this->get_logger(), "[OPTIMIZED] Found %zu connected components",
+                components.size());
+
+    // Log component sizes (limit to first 10)
+    size_t max_log = std::min(static_cast<size_t>(10), components.size());
+    for (size_t i = 0; i < max_log; ++i) {
+      RCLCPP_INFO(this->get_logger(), "[OPTIMIZED] Component %zu has %zu points",
+                  i, components[i].size());
+    }
+    if (components.size() > max_log) {
+      RCLCPP_INFO(this->get_logger(), "[OPTIMIZED] ... and %zu more components",
+                  components.size() - max_log);
+    }
+
+    return components;
+  }
+
+  std::vector<std::vector<int>> compute_disjoint_safe_sets() {
+    RCLCPP_INFO(this->get_logger(),
+                "[DISJOINT] Starting compute_disjoint_safe_sets()");
+
+    std::vector<int> safe_indices;
+
+    // Collect all safe point indices
+    for (int i = 0; i < S_.rows(); ++i) {
+      if (S_(i)) {
+        safe_indices.push_back(i);
+      }
+    }
+
+    RCLCPP_INFO(this->get_logger(), "[DISJOINT] Found %zu safe points",
+                safe_indices.size());
+
+    if (safe_indices.empty()) {
+      RCLCPP_WARN(this->get_logger(),
+                  "[DISJOINT] No safe points found, returning empty");
+      return {};
+    }
+
+    // Distance threshold: resolution_width * 2 - epsilon
+    double distance_threshold =
+        std::max(terrain_x_resolution_, terrain_y_resolution_) * 2.0 - 1e-6;
+    RCLCPP_INFO(this->get_logger(), "[DISJOINT] Using distance threshold: %f",
+                distance_threshold);
+
+    // Use direct distance approach
+    return compute_disjoint_sets_direct(safe_indices, distance_threshold);
+  }
 
   void ComputeSets() {
     // Compute the confidence intervals
@@ -286,7 +511,8 @@ private:
     }
 
     const Eigen::VectorXd goal_eigen =
-        (Eigen::VectorXd(2) << current_goal_.point.x, current_goal_.point.y).finished();
+        (Eigen::VectorXd(2) << current_goal_.point.x, current_goal_.point.y)
+            .finished();
     const Eigen::VectorXd distances =
         (frontier_points.rowwise() - goal_eigen.transpose()).rowwise().norm();
 
@@ -462,7 +688,8 @@ private:
         subgoal.z = 0.0;
 
         // Publish visualization of the projection
-        publish_projected_goal_marker(current_goal_.point, subgoal, projection_result.dist);
+        publish_projected_goal_marker(current_goal_.point, subgoal,
+                                      projection_result.dist);
 
         RCLCPP_INFO(this->get_logger(),
                     "Published projected subgoal: (%f, %f) (distance: %f)",
@@ -479,7 +706,11 @@ private:
     publish_subgoal_marker(subgoal);
   }
 
-  void publish_obstacle_polygons() {
+  bg::model::polygon<bg::model::d2::point_xy<double>>
+  create_concave_polygon_from_points(const std::vector<int> &point_indices) {
+    RCLCPP_INFO(this->get_logger(),
+                "[POLYGON] Creating concave polygon from %zu points",
+                point_indices.size());
 
     // Use CGAL Alpha Shape instead of concaveman
     typedef CGAL::Exact_predicates_inexact_constructions_kernel K;
@@ -490,68 +721,51 @@ private:
     typedef CGAL::Alpha_shape_2<Triangulation_2> Alpha_shape_2;
     typedef K::Point_2 Point_2;
 
-    // Convert points to CGAL format - reserve capacity based on safe point
-    // count
-    int safe_count = S_.count();
-    if (safe_count == 0) {
-      RCLCPP_WARN(this->get_logger(),
-                  "No safe points available for polygon generation");
-      return;
+    std::vector<Point_2> cgal_points;
+    cgal_points.reserve(point_indices.size());
+    for (int idx : point_indices) {
+      cgal_points.emplace_back(D_(idx, 0), D_(idx, 1));
     }
 
-    std::vector<Point_2> cgal_points;
-    cgal_points.reserve(safe_count);
-    for (int i = 0; i < D_.rows(); ++i) {
-      if (S_(i)) { // Only consider safe points
-        cgal_points.emplace_back(D_(i, 0), D_(i, 1));
-      }
+    if (cgal_points.size() < 3) {
+      RCLCPP_WARN(
+          this->get_logger(),
+          "[POLYGON] Insufficient points (%zu) for polygon, returning empty",
+          cgal_points.size());
+      return bg::model::polygon<bg::model::d2::point_xy<double>>();
     }
 
     // Create alpha shape
     Alpha_shape_2 alpha_shape(cgal_points.begin(), cgal_points.end());
-
-    // Set alpha shape to regularized mode for better boundary extraction
     alpha_shape.set_mode(Alpha_shape_2::REGULARIZED);
 
-    // Find optimal alpha value (can be adjusted based on your needs)
-    // Using a small alpha to get a detailed boundary
+    // Find optimal alpha value
     auto alpha_iterator = alpha_shape.find_optimal_alpha(1);
     if (alpha_iterator != alpha_shape.alpha_end()) {
       alpha_shape.set_alpha(*alpha_iterator);
     } else {
-      // Fallback to a reasonable alpha value
       alpha_shape.set_alpha(0.1);
     }
 
-    // Extract boundary edges and create ordered boundary
-    std::vector<std::array<double, 2>> alpha_shape_boundary;
-    alpha_shape_boundary.reserve(safe_count / 4); // Estimate boundary size
-
-    // Collect boundary edges - reserve estimated capacity
+    // Collect boundary edges
     std::vector<typename Alpha_shape_2::Edge> boundary_edges;
-    boundary_edges.reserve(safe_count / 2); // Conservative estimate
     for (auto edge_it = alpha_shape.alpha_shape_edges_begin();
          edge_it != alpha_shape.alpha_shape_edges_end(); ++edge_it) {
       boundary_edges.push_back(*edge_it);
     }
 
-    // Create boost geometry polygon from alpha shape boundary
     bg::model::polygon<bg::model::d2::point_xy<double>> concave_polygon;
 
     if (!boundary_edges.empty()) {
-      // Create a properly ordered boundary by traversing edges
       std::vector<Point_2> ordered_boundary;
-      ordered_boundary.reserve(boundary_edges.size()); // Reserve capacity
       std::map<Point_2, std::vector<Point_2>> adjacency_map;
 
       // Build adjacency map from boundary edges
       for (const auto &edge : boundary_edges) {
         auto face = edge.first;
         int idx = edge.second;
-
         Point_2 p1 = face->vertex((idx + 1) % 3)->point();
         Point_2 p2 = face->vertex((idx + 2) % 3)->point();
-
         adjacency_map[p1].push_back(p2);
         adjacency_map[p2].push_back(p1);
       }
@@ -565,9 +779,7 @@ private:
         do {
           ordered_boundary.push_back(current);
           visited.insert(current);
-
-          // Find next unvisited neighbor
-          Point_2 next = current; // fallback
+          Point_2 next = current;
           for (const auto &neighbor : adjacency_map[current]) {
             if (visited.find(neighbor) == visited.end() ||
                 (neighbor == start_point && ordered_boundary.size() > 2)) {
@@ -575,7 +787,6 @@ private:
               break;
             }
           }
-
           current = next;
         } while (current != start_point &&
                  visited.find(current) == visited.end() &&
@@ -587,25 +798,113 @@ private:
         bg::append(concave_polygon.outer(),
                    bg::model::d2::point_xy<double>(CGAL::to_double(point.x()),
                                                    CGAL::to_double(point.y())));
-        alpha_shape_boundary.push_back(
-            {CGAL::to_double(point.x()), CGAL::to_double(point.y())});
       }
     } else {
-      // Fallback: if no alpha shape boundary, use convex hull
-      RCLCPP_WARN(this->get_logger(),
-                  "No alpha shape boundary found, using all safe points");
+      // Fallback: use all points
       for (const auto &point : cgal_points) {
         bg::append(concave_polygon.outer(),
                    bg::model::d2::point_xy<double>(CGAL::to_double(point.x()),
                                                    CGAL::to_double(point.y())));
-        alpha_shape_boundary.push_back(
-            {CGAL::to_double(point.x()), CGAL::to_double(point.y())});
       }
     }
 
     bg::correct(concave_polygon);
+    return concave_polygon;
+  }
 
-    // Erode the concave polygon for safe subgoal placement
+  void publish_obstacle_polygons() {
+    RCLCPP_INFO(this->get_logger(),
+                "[MAIN] Starting publish_obstacle_polygons()");
+
+    int safe_count = S_.count();
+    RCLCPP_INFO(this->get_logger(), "[MAIN] Total safe points: %d", safe_count);
+
+    if (safe_count == 0) {
+      RCLCPP_WARN(this->get_logger(),
+                  "[MAIN] No safe points available for polygon generation");
+      return;
+    }
+
+    // Compute disjoint sets of safe points
+    RCLCPP_INFO(this->get_logger(), "[MAIN] Computing disjoint sets...");
+    std::vector<std::vector<int>> disjoint_sets = compute_disjoint_safe_sets();
+
+    if (disjoint_sets.empty()) {
+      RCLCPP_WARN(this->get_logger(), "[MAIN] No disjoint sets found");
+      return;
+    }
+
+    RCLCPP_INFO(this->get_logger(), "[MAIN] Found %zu disjoint safe sets",
+                disjoint_sets.size());
+
+    // Create multiple concave polygons from each disjoint set
+    RCLCPP_INFO(this->get_logger(), "[MAIN] Creating concave polygons...");
+    std::vector<bg::model::polygon<bg::model::d2::point_xy<double>>>
+        concave_polygons;
+    std::vector<std::array<double, 2>> all_boundaries;
+
+    int polygon_count = 0;
+    for (size_t i = 0; i < disjoint_sets.size(); ++i) {
+      const auto &point_set = disjoint_sets[i];
+      RCLCPP_INFO(this->get_logger(),
+                  "[MAIN] Processing set %zu with %zu points", i,
+                  point_set.size());
+
+      if (point_set.size() >= 3) { // Need at least 3 points for a polygon
+        auto polygon = create_concave_polygon_from_points(point_set);
+        if (!polygon.outer().empty()) {
+          concave_polygons.push_back(polygon);
+          polygon_count++;
+          RCLCPP_INFO(
+              this->get_logger(),
+              "[MAIN] Successfully created polygon %d with %zu boundary points",
+              polygon_count, polygon.outer().size());
+
+          // Collect boundary points for visualization
+          for (const auto &point : polygon.outer()) {
+            all_boundaries.push_back({point.get<0>(), point.get<1>()});
+          }
+        } else {
+          RCLCPP_WARN(this->get_logger(),
+                      "[MAIN] Failed to create polygon from set %zu", i);
+        }
+      } else {
+        RCLCPP_INFO(this->get_logger(),
+                    "[MAIN] Skipping set %zu - insufficient points (%zu)", i,
+                    point_set.size());
+      }
+    }
+
+    if (concave_polygons.empty()) {
+      RCLCPP_WARN(this->get_logger(),
+                  "[MAIN] No valid concave polygons created");
+      return;
+    }
+
+    RCLCPP_INFO(this->get_logger(),
+                "[MAIN] Successfully created %zu concave polygons",
+                concave_polygons.size());
+
+    // Find the largest polygon for subgoal projection (or use first one)
+    RCLCPP_INFO(this->get_logger(),
+                "[MAIN] Finding largest polygon for subgoal projection...");
+    size_t largest_polygon_idx = 0;
+    double largest_area = 0.0;
+    for (size_t i = 0; i < concave_polygons.size(); ++i) {
+      double area = bg::area(concave_polygons[i]);
+      RCLCPP_INFO(this->get_logger(), "[MAIN] Polygon %zu area: %f", i, area);
+      if (area > largest_area) {
+        largest_area = area;
+        largest_polygon_idx = i;
+      }
+    }
+    RCLCPP_INFO(this->get_logger(),
+                "[MAIN] Selected polygon %zu as largest (area: %f)",
+                largest_polygon_idx, largest_area);
+
+    // Erode the largest concave polygon for safe subgoal placement
+    RCLCPP_INFO(this->get_logger(),
+                "[MAIN] Eroding largest polygon for subgoal projection...");
     bg::strategy::buffer::distance_symmetric<double> erosion_distance(
         -subgoal_erosion_);
     bg::strategy::buffer::join_round join_strategy;
@@ -616,26 +915,57 @@ private:
     bg::model::multi_polygon<
         bg::model::polygon<bg::model::d2::point_xy<double>>>
         eroded_multi;
-    bg::buffer(concave_polygon, eroded_multi, erosion_distance, side_strategy,
-               join_strategy, end_strategy, point_strategy);
+    bg::buffer(concave_polygons[largest_polygon_idx], eroded_multi,
+               erosion_distance, side_strategy, join_strategy, end_strategy,
+               point_strategy);
 
-    // Store the eroded polygon (use the first polygon if buffer succeeded)
     if (!eroded_multi.empty()) {
       eroded_concave_polygon_ = eroded_multi[0];
-      RCLCPP_INFO(this->get_logger(),
-                  "Eroded concave polygon for subgoal projection");
+      RCLCPP_INFO(this->get_logger(), "[MAIN] Successfully eroded largest "
+                                      "concave polygon for subgoal projection");
     } else {
-      // Fallback: use original polygon if erosion failed
-      eroded_concave_polygon_ = concave_polygon;
-      RCLCPP_WARN(this->get_logger(),
-                  "Erosion failed, using original concave polygon");
+      eroded_concave_polygon_ = concave_polygons[largest_polygon_idx];
+      RCLCPP_WARN(
+          this->get_logger(),
+          "[MAIN] Erosion failed, using original largest concave polygon");
     }
 
-    // Publish concave polygon markers for visualization
-    publish_concave_markers(concave_polygon);
+    // Publish concave polygon markers for visualization (all polygons)
+    RCLCPP_INFO(this->get_logger(),
+                "[MAIN] Publishing visualization markers...");
+    publish_multiple_concave_markers(concave_polygons);
 
+    // Create envelope from all concave polygons
+    RCLCPP_INFO(this->get_logger(),
+                "[MAIN] Creating envelope from all polygons...");
     bg::model::box<bg::model::d2::point_xy<double>> envelope_box;
-    bg::envelope(concave_polygon, envelope_box);
+    bool first_polygon = true;
+    for (size_t i = 0; i < concave_polygons.size(); ++i) {
+      const auto &polygon = concave_polygons[i];
+      bg::model::box<bg::model::d2::point_xy<double>> poly_box;
+      bg::envelope(polygon, poly_box);
+
+      if (first_polygon) {
+        envelope_box = poly_box;
+        first_polygon = false;
+        RCLCPP_INFO(
+            this->get_logger(),
+            "[MAIN] Initial envelope: min(%.2f,%.2f) max(%.2f,%.2f)",
+            poly_box.min_corner().get<0>(), poly_box.min_corner().get<1>(),
+            poly_box.max_corner().get<0>(), poly_box.max_corner().get<1>());
+      } else {
+        // Expand envelope to include this polygon
+        bg::expand(envelope_box, poly_box);
+        RCLCPP_INFO(this->get_logger(),
+                    "[MAIN] Expanded envelope for polygon %zu", i);
+      }
+    }
+
+    RCLCPP_INFO(
+        this->get_logger(),
+        "[MAIN] Final envelope: min(%.2f,%.2f) max(%.2f,%.2f)",
+        envelope_box.min_corner().get<0>(), envelope_box.min_corner().get<1>(),
+        envelope_box.max_corner().get<0>(), envelope_box.max_corner().get<1>());
 
     // Publish envelope polygon
     geometry_msgs::msg::Polygon envelope_msg;
@@ -645,7 +975,6 @@ private:
     max_corner.x = envelope_box.max_corner().get<0>();
     max_corner.y = envelope_box.max_corner().get<1>();
 
-    // Create rectangle from envelope box
     envelope_msg.points.push_back(min_corner);
     geometry_msgs::msg::Point32 bottom_right;
     bottom_right.x = max_corner.x;
@@ -659,14 +988,100 @@ private:
 
     envelope_pub_->publish(envelope_msg);
 
+    // Create obstacle polygons by subtracting ALL concave polygons from
+    // envelope
+    RCLCPP_INFO(this->get_logger(),
+                "[MAIN] Creating obstacle polygons by subtracting concave "
+                "polygons from envelope...");
     bg::model::multi_polygon<
         bg::model::polygon<bg::model::d2::point_xy<double>>>
         obstacle_polygons;
 
-    bg::difference(envelope_box, concave_polygon, obstacle_polygons);
+    // Start with the envelope box, eroded by robot radius
+    bg::model::multi_polygon<
+        bg::model::polygon<bg::model::d2::point_xy<double>>>
+        current_obstacles;
+    bg::model::polygon<bg::model::d2::point_xy<double>> envelope_polygon;
+    bg::append(
+        envelope_polygon.outer(),
+        bg::model::d2::point_xy<double>(envelope_box.min_corner().get<0>(),
+                                        envelope_box.min_corner().get<1>()));
+    bg::append(
+        envelope_polygon.outer(),
+        bg::model::d2::point_xy<double>(envelope_box.max_corner().get<0>(),
+                                        envelope_box.min_corner().get<1>()));
+    bg::append(
+        envelope_polygon.outer(),
+        bg::model::d2::point_xy<double>(envelope_box.max_corner().get<0>(),
+                                        envelope_box.max_corner().get<1>()));
+    bg::append(
+        envelope_polygon.outer(),
+        bg::model::d2::point_xy<double>(envelope_box.min_corner().get<0>(),
+                                        envelope_box.max_corner().get<1>()));
+    bg::correct(envelope_polygon);
+    
+    // Erode the envelope polygon by robot radius
+    bg::strategy::buffer::distance_symmetric<double> envelope_erosion_distance(
+        -robot_radius_);
+    bg::strategy::buffer::join_round envelope_join_strategy;
+    bg::strategy::buffer::end_round envelope_end_strategy;
+    bg::strategy::buffer::point_circle envelope_point_strategy;
+    bg::strategy::buffer::side_straight envelope_side_strategy;
 
+    bg::model::multi_polygon<
+        bg::model::polygon<bg::model::d2::point_xy<double>>>
+        eroded_envelope_multi;
+    bg::buffer(envelope_polygon, eroded_envelope_multi,
+               envelope_erosion_distance, envelope_side_strategy, 
+               envelope_join_strategy, envelope_end_strategy,
+               envelope_point_strategy);
+
+    if (!eroded_envelope_multi.empty()) {
+      current_obstacles.push_back(eroded_envelope_multi[0]);
+      RCLCPP_INFO(this->get_logger(),
+                  "[MAIN] Successfully eroded envelope polygon by robot radius: %f",
+                  robot_radius_);
+    } else {
+      current_obstacles.push_back(envelope_polygon);
+      RCLCPP_WARN(
+          this->get_logger(),
+          "[MAIN] Envelope erosion failed, using original envelope polygon");
+    }
+    RCLCPP_INFO(this->get_logger(),
+                "[MAIN] Starting with envelope polygon (%zu obstacle polygons)",
+                current_obstacles.size());
+
+    // Subtract each concave polygon from the current obstacle set
+    for (size_t i = 0; i < concave_polygons.size(); ++i) {
+      const auto &concave_polygon = concave_polygons[i];
+      RCLCPP_INFO(this->get_logger(),
+                  "[MAIN] Subtracting concave polygon %zu from obstacles...",
+                  i);
+
+      bg::model::multi_polygon<
+          bg::model::polygon<bg::model::d2::point_xy<double>>>
+          temp_obstacles;
+      bg::difference(current_obstacles, concave_polygon, temp_obstacles);
+
+      RCLCPP_INFO(
+          this->get_logger(),
+          "[MAIN] After subtracting polygon %zu: %zu -> %zu obstacle polygons",
+          i, current_obstacles.size(), temp_obstacles.size());
+
+      current_obstacles = temp_obstacles;
+    }
+
+    obstacle_polygons = current_obstacles;
+    RCLCPP_INFO(this->get_logger(), "[MAIN] Final obstacle polygons: %zu",
+                obstacle_polygons.size());
+
+    // Publish obstacle polygons
+    RCLCPP_INFO(this->get_logger(),
+                "[MAIN] Publishing %zu obstacle polygons...",
+                obstacle_polygons.size());
     safe_bayesian_optimization::msg::PolygonArray polygon_array_msg;
-    for (const auto &polygon : obstacle_polygons) {
+    for (size_t i = 0; i < obstacle_polygons.size(); ++i) {
+      const auto &polygon = obstacle_polygons[i];
       geometry_msgs::msg::Polygon msg_polygon;
       for (const auto &point : polygon.outer()) {
         geometry_msgs::msg::Point32 p;
@@ -675,13 +1090,23 @@ private:
         msg_polygon.points.push_back(p);
       }
       polygon_array_msg.polygons.push_back(msg_polygon);
+      RCLCPP_INFO(this->get_logger(),
+                  "[MAIN] Obstacle polygon %zu has %zu points", i,
+                  polygon.outer().size());
     }
     polygons_pub_->publish(polygon_array_msg);
+    RCLCPP_INFO(this->get_logger(),
+                "[MAIN] Successfully published obstacle polygons");
 
     // Publish debug visualization image if enabled
     if (publish_debug_image_ && debug_image_pub_) {
-      publish_debug_image(obstacle_polygons, alpha_shape_boundary);
+      RCLCPP_INFO(this->get_logger(),
+                  "[MAIN] Publishing debug visualization image...");
+      publish_debug_image(obstacle_polygons, all_boundaries);
     }
+
+    RCLCPP_INFO(this->get_logger(),
+                "[MAIN] Completed publish_obstacle_polygons()");
   }
 
   void
@@ -776,8 +1201,9 @@ private:
 
     // // Draw current goal in magenta if available
     // if (current_goal_.point.x != 0.0 || current_goal_.point.y != 0.0) {
-    //   cv::Point goal_img = world_to_image(current_goal_.point.x, current_goal_.point.y);
-    //   if (goal_img.x >= 0 && goal_img.x < img_width &&
+    //   cv::Point goal_img = world_to_image(current_goal_.point.x,
+    //   current_goal_.point.y); if (goal_img.x >= 0 && goal_img.x < img_width
+    //   &&
     //       goal_img.y >= 0 && goal_img.y < img_height) {
     //     cv::circle(debug_img, goal_img, 8, cv::Scalar(255, 0, 255), -1);
     //     cv::circle(debug_img, goal_img, 12, cv::Scalar(255, 255, 255), 2);
@@ -805,7 +1231,8 @@ private:
     RCLCPP_DEBUG(this->get_logger(), "Published debug visualization image");
   }
 
-  void goal_point_callback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
+  void
+  goal_point_callback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
     current_goal_.point = msg->point;
   }
 
@@ -874,9 +1301,66 @@ private:
     concave_markers_pub_->publish(marker_array);
   }
 
-  void publish_projected_goal_marker(const geometry_msgs::msg::Point &original_goal,
-                                   const geometry_msgs::msg::Point &projected_goal,
-                                   double projection_distance) {
+  void publish_multiple_concave_markers(
+      const std::vector<bg::model::polygon<bg::model::d2::point_xy<double>>>
+          &concave_polygons) {
+    auto marker_array = visualization_msgs::msg::MarkerArray();
+
+    // Color palette for different polygons
+    std::vector<std::array<float, 3>> colors = {
+        {0.0, 0.0, 1.0}, // Blue
+        {0.0, 1.0, 0.0}, // Green
+        {1.0, 0.0, 0.0}, // Red
+        {1.0, 1.0, 0.0}, // Yellow
+        {1.0, 0.0, 1.0}, // Magenta
+        {0.0, 1.0, 1.0}, // Cyan
+        {0.5, 0.0, 0.5}, // Purple
+        {1.0, 0.5, 0.0}  // Orange
+    };
+
+    for (size_t i = 0; i < concave_polygons.size(); ++i) {
+      const auto &concave_polygon = concave_polygons[i];
+
+      auto marker = visualization_msgs::msg::Marker();
+      marker.header.frame_id = "map";
+      marker.header.stamp = this->now();
+      marker.ns = "concave_multiple";
+      marker.id = static_cast<int>(i);
+      marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+
+      // Set marker properties
+      marker.scale.x = 0.06; // Line width
+      auto &color = colors[i % colors.size()];
+      marker.color.r = color[0];
+      marker.color.g = color[1];
+      marker.color.b = color[2];
+      marker.color.a = 0.8;
+
+      // Convert concave polygon points to marker points
+      for (const auto &boost_point : concave_polygon.outer()) {
+        geometry_msgs::msg::Point point;
+        point.x = boost_point.get<0>();
+        point.y = boost_point.get<1>();
+        point.z = 0.0;
+        marker.points.push_back(point);
+      }
+
+      // Close the polygon by adding the first point at the end
+      if (!marker.points.empty()) {
+        marker.points.push_back(marker.points[0]);
+      }
+
+      marker_array.markers.push_back(marker);
+    }
+
+    concave_markers_pub_->publish(marker_array);
+  }
+
+  void
+  publish_projected_goal_marker(const geometry_msgs::msg::Point &original_goal,
+                                const geometry_msgs::msg::Point &projected_goal,
+                                double projection_distance) {
     visualization_msgs::msg::Marker line_marker;
     line_marker.header.frame_id = "map";
     line_marker.header.stamp = this->get_clock()->now();
