@@ -809,7 +809,12 @@ private:
     }
 
     bg::correct(concave_polygon);
-    return concave_polygon;
+    
+    // Simplify the concave polygon with tolerance 0.1
+    bg::model::polygon<bg::model::d2::point_xy<double>> simplified_polygon;
+    bg::simplify(concave_polygon, simplified_polygon, 0.1);
+    
+    return simplified_polygon;
   }
 
   void publish_obstacle_polygons() {
@@ -825,65 +830,101 @@ private:
       return;
     }
 
-    // Compute disjoint sets of safe points
-    RCLCPP_INFO(this->get_logger(), "[MAIN] Computing disjoint sets...");
-    std::vector<std::vector<int>> disjoint_sets = compute_disjoint_safe_sets();
+    // // Compute disjoint sets of safe points (COMMENTED OUT)
+    // RCLCPP_INFO(this->get_logger(), "[MAIN] Computing disjoint sets...");
+    // std::vector<std::vector<int>> disjoint_sets = compute_disjoint_safe_sets();
 
-    if (disjoint_sets.empty()) {
-      RCLCPP_WARN(this->get_logger(), "[MAIN] No disjoint sets found");
-      return;
-    }
+    // if (disjoint_sets.empty()) {
+    //   RCLCPP_WARN(this->get_logger(), "[MAIN] No disjoint sets found");
+    //   return;
+    // }
 
-    RCLCPP_INFO(this->get_logger(), "[MAIN] Found %zu disjoint safe sets",
-                disjoint_sets.size());
+    // RCLCPP_INFO(this->get_logger(), "[MAIN] Found %zu disjoint safe sets",
+    //             disjoint_sets.size());
 
-    // Create multiple concave polygons from each disjoint set
-    RCLCPP_INFO(this->get_logger(), "[MAIN] Creating concave polygons...");
-    std::vector<bg::model::polygon<bg::model::d2::point_xy<double>>>
-        concave_polygons;
-    std::vector<std::array<double, 2>> all_boundaries;
+    // // Create multiple concave polygons from each disjoint set (COMMENTED OUT)
+    // RCLCPP_INFO(this->get_logger(), "[MAIN] Creating concave polygons...");
+    // std::vector<bg::model::polygon<bg::model::d2::point_xy<double>>>
+    //     concave_polygons;
+    // std::vector<std::array<double, 2>> all_boundaries;
 
-    int polygon_count = 0;
-    for (size_t i = 0; i < disjoint_sets.size(); ++i) {
-      const auto &point_set = disjoint_sets[i];
-      RCLCPP_INFO(this->get_logger(),
-                  "[MAIN] Processing set %zu with %zu points", i,
-                  point_set.size());
+    // int polygon_count = 0;
+    // for (size_t i = 0; i < disjoint_sets.size(); ++i) {
+    //   const auto &point_set = disjoint_sets[i];
+    //   RCLCPP_INFO(this->get_logger(),
+    //               "[MAIN] Processing set %zu with %zu points", i,
+    //               point_set.size());
 
-      if (point_set.size() >= 3) { // Need at least 3 points for a polygon
-        auto polygon = create_concave_polygon_from_points(point_set);
-        if (!polygon.outer().empty()) {
-          concave_polygons.push_back(polygon);
-          polygon_count++;
-          RCLCPP_INFO(
-              this->get_logger(),
-              "[MAIN] Successfully created polygon %d with %zu boundary points",
-              polygon_count, polygon.outer().size());
+    //   if (point_set.size() >= 3) { // Need at least 3 points for a polygon
+    //     auto polygon = create_concave_polygon_from_points(point_set);
+    //     if (!polygon.outer().empty()) {
+    //       concave_polygons.push_back(polygon);
+    //       polygon_count++;
+    //       RCLCPP_INFO(
+    //           this->get_logger(),
+    //           "[MAIN] Successfully created polygon %d with %zu boundary points",
+    //           polygon_count, polygon.outer().size());
 
-          // Collect boundary points for visualization
-          for (const auto &point : polygon.outer()) {
-            all_boundaries.push_back({point.get<0>(), point.get<1>()});
-          }
-        } else {
-          RCLCPP_WARN(this->get_logger(),
-                      "[MAIN] Failed to create polygon from set %zu", i);
-        }
-      } else {
-        RCLCPP_INFO(this->get_logger(),
-                    "[MAIN] Skipping set %zu - insufficient points (%zu)", i,
-                    point_set.size());
+    //       // Collect boundary points for visualization
+    //       for (const auto &point : polygon.outer()) {
+    //         all_boundaries.push_back({point.get<0>(), point.get<1>()});
+    //       }
+    //     } else {
+    //       RCLCPP_WARN(this->get_logger(),
+    //                   "[MAIN] Failed to create polygon from set %zu", i);
+    //     }
+    //   } else {
+    //     RCLCPP_INFO(this->get_logger(),
+    //                 "[MAIN] Skipping set %zu - insufficient points (%zu)", i,
+    //                 point_set.size());
+    //   }
+    // }
+
+    // if (concave_polygons.empty()) {
+    //   RCLCPP_WARN(this->get_logger(),
+    //               "[MAIN] No valid concave polygons created");
+    //   return;
+    // }
+
+    // RCLCPP_INFO(this->get_logger(),
+    //             "[MAIN] Successfully created %zu concave polygons",
+    //             concave_polygons.size());
+
+    // Create single concave polygon from all safe points
+    RCLCPP_INFO(this->get_logger(), "[MAIN] Creating concave hull from all safe points...");
+    std::vector<int> all_safe_indices;
+    for (int i = 0; i < S_.rows(); ++i) {
+      if (S_(i)) {
+        all_safe_indices.push_back(i);
       }
     }
 
-    if (concave_polygons.empty()) {
+    if (all_safe_indices.size() < 3) {
       RCLCPP_WARN(this->get_logger(),
-                  "[MAIN] No valid concave polygons created");
+                  "[MAIN] Insufficient safe points (%zu) for polygon creation",
+                  all_safe_indices.size());
       return;
     }
 
+    auto concave_polygon = create_concave_polygon_from_points(all_safe_indices);
+    if (concave_polygon.outer().empty()) {
+      RCLCPP_WARN(this->get_logger(),
+                  "[MAIN] Failed to create concave polygon from safe points");
+      return;
+    }
+
+    std::vector<bg::model::polygon<bg::model::d2::point_xy<double>>>
+        concave_polygons;
+    concave_polygons.push_back(concave_polygon);
+
+    std::vector<std::array<double, 2>> all_boundaries;
+    for (const auto &point : concave_polygon.outer()) {
+      all_boundaries.push_back({point.get<0>(), point.get<1>()});
+    }
+
     RCLCPP_INFO(this->get_logger(),
-                "[MAIN] Successfully created %zu concave polygons",
-                concave_polygons.size());
+                "[MAIN] Successfully created single concave polygon with %zu boundary points",
+                concave_polygon.outer().size());
 
     // Find the largest polygon for subgoal projection (or use first one)
     RCLCPP_INFO(this->get_logger(),

@@ -97,7 +97,7 @@ class TurtlesimSpatialPublisher(Node):
         min_val = np.min(self.terrain_data)
         max_val = np.max(self.terrain_data)
         normalized = (terrain_value - min_val) / (max_val - min_val)
-        return normalized * 30.0
+        return normalized * 10.0
     
     def pose_callback(self, msg):
         """Store the current spirit pose"""
