@@ -1,6 +1,7 @@
 #include <geometry_msgs/msg/point_stamped.hpp>
 #include <geometry_msgs/msg/pose.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <std_srvs/srv/trigger.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <yaml-cpp/yaml.h>
@@ -23,6 +24,12 @@ public:
         "spirit/current_pose", 10,
         std::bind(&GoalPointPublisher::pose_callback, this, std::placeholders::_1));
 
+
+    goal_input_subscriber_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
+        "input_goal_point", 10,
+        std::bind(&GoalPointPublisher::goal_input_callback, this, std::placeholders::_1));
+
+
     timer_ = this->create_wall_timer(
         std::chrono::seconds(2),
         std::bind(&GoalPointPublisher::check_waypoint_progress, this));
@@ -30,6 +37,12 @@ public:
     marker_timer_ = this->create_wall_timer(
         std::chrono::seconds(1),
         std::bind(&GoalPointPublisher::publish_all_goal_markers, this));
+
+
+    increment_service_ = this->create_service<std_srvs::srv::Trigger>(
+        "increment_goal_index",
+        std::bind(&GoalPointPublisher::increment_goal_index, this, std::placeholders::_1, std::placeholders::_2));
+
 
     load_waypoints_from_config();
     current_waypoint_index_ = 0;
@@ -63,6 +76,13 @@ private:
   void pose_callback(const geometry_msgs::msg::Pose::SharedPtr msg) {
     current_pose_ = *msg;
     pose_received_ = true;
+  }
+
+
+  void goal_input_callback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
+    waypoints_.push_back(msg->point);
+    RCLCPP_INFO(this->get_logger(), "Added new goal point: (%.2f, %.2f, %.2f). Total waypoints: %zu",
+                msg->point.x, msg->point.y, msg->point.z, waypoints_.size());
   }
 
   void check_waypoint_progress() {
@@ -143,6 +163,28 @@ private:
     marker_pub_->publish(marker);
   }
 
+  void increment_goal_index(const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+                             std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+    if (waypoints_.empty()) {
+      response->success = false;
+      response->message = "No waypoints loaded";
+      return;
+    }
+
+    if (current_waypoint_index_ >= waypoints_.size() - 1) {
+      response->success = false;
+      response->message = "Already at final waypoint";
+      return;
+    }
+
+    current_waypoint_index_++;
+    response->success = true;
+    response->message = "Goal index incremented to " + std::to_string(current_waypoint_index_);
+    
+    RCLCPP_INFO(this->get_logger(), "Manually incremented to waypoint %zu", current_waypoint_index_);
+  }
+
+
   void publish_all_goal_markers() {
     visualization_msgs::msg::MarkerArray marker_array;
     
@@ -191,6 +233,9 @@ private:
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_array_pub_;
   rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr pose_subscriber_;
+  rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr goal_input_subscriber_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr increment_service_;
+
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::TimerBase::SharedPtr marker_timer_;
   
