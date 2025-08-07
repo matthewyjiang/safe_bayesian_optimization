@@ -2,6 +2,7 @@
 #include <geometry_msgs/msg/pose.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <visualization_msgs/msg/marker.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 #include <yaml-cpp/yaml.h>
 #include <vector>
 #include <cmath>
@@ -15,6 +16,9 @@ public:
     marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>(
         "goal_marker", 10);
 
+    marker_array_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
+        "goal_markers", 10);
+
     pose_subscriber_ = this->create_subscription<geometry_msgs::msg::Pose>(
         "spirit/current_pose", 10,
         std::bind(&GoalPointPublisher::pose_callback, this, std::placeholders::_1));
@@ -23,8 +27,14 @@ public:
         std::chrono::seconds(2),
         std::bind(&GoalPointPublisher::check_waypoint_progress, this));
 
+    marker_timer_ = this->create_wall_timer(
+        std::chrono::seconds(1),
+        std::bind(&GoalPointPublisher::publish_all_goal_markers, this));
+
     load_waypoints_from_config();
     current_waypoint_index_ = 0;
+    
+    publish_all_goal_markers();
 
     RCLCPP_INFO(this->get_logger(), "Goal Point Publisher initialized with %zu waypoints", waypoints_.size());
   }
@@ -133,10 +143,56 @@ private:
     marker_pub_->publish(marker);
   }
 
+  void publish_all_goal_markers() {
+    visualization_msgs::msg::MarkerArray marker_array;
+    
+    for (size_t i = 0; i < waypoints_.size(); ++i) {
+      visualization_msgs::msg::Marker marker;
+      marker.header.frame_id = "map";
+      marker.header.stamp = this->get_clock()->now();
+      marker.ns = "all_goals";
+      marker.id = i;
+      marker.type = visualization_msgs::msg::Marker::SPHERE;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+
+      marker.pose.position.x = waypoints_[i].x;
+      marker.pose.position.y = waypoints_[i].y;
+      marker.pose.position.z = waypoints_[i].z;
+      marker.pose.orientation.w = 1.0;
+
+      marker.scale.x = 0.3;
+      marker.scale.y = 0.3;
+      marker.scale.z = 0.3;
+
+      if (i < current_waypoint_index_) {
+        marker.color.r = 0.0;
+        marker.color.g = 1.0;
+        marker.color.b = 0.0;
+        marker.color.a = 0.7;
+      } else if (i == current_waypoint_index_) {
+        marker.color.r = 1.0;
+        marker.color.g = 0.0;
+        marker.color.b = 0.0;
+        marker.color.a = 1.0;
+      } else {
+        marker.color.r = 0.0;
+        marker.color.g = 0.0;
+        marker.color.b = 1.0;
+        marker.color.a = 0.5;
+      }
+
+      marker_array.markers.push_back(marker);
+    }
+
+    marker_array_pub_->publish(marker_array);
+  }
+
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr publisher_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_array_pub_;
   rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr pose_subscriber_;
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::TimerBase::SharedPtr marker_timer_;
   
   std::vector<geometry_msgs::msg::Point> waypoints_;
   size_t current_waypoint_index_;

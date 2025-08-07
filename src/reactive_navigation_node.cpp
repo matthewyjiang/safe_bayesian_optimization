@@ -258,7 +258,7 @@ private:
     std::vector<polygon> polygon_list_merged;
     for (size_t i = 0; i < output_union.size(); i++) {
       polygon simplified_component;
-      bg::simplify(output_union[i], simplified_component, 0.1);
+      bg::simplify(output_union[i], simplified_component, 0.2);
       polygon_list_merged.push_back(simplified_component);
     }
 
