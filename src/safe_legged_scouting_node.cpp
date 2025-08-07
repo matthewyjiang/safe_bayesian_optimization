@@ -1,5 +1,5 @@
 #include "polygeom_lib.h"
-#include "safe_bayesian_optimization/msg/polygon_array.hpp"
+#include "safe_legged_scouting/msg/polygon_array.hpp"
 #include "trusses_custom_interfaces/srv/get_terrain_map_with_uncertainty.hpp"
 #include "std_msgs/msg/int32.hpp"
 #include <CGAL/Alpha_shape_2.h>
@@ -97,7 +97,7 @@ public:
         this->create_publisher<visualization_msgs::msg::Marker>(
             "subgoal_marker", 10);
     polygons_pub_ =
-        this->create_publisher<safe_bayesian_optimization::msg::PolygonArray>(
+        this->create_publisher<safe_legged_scouting::msg::PolygonArray>(
             "polygon_array", 10);
 
     envelope_pub_ = this->create_publisher<geometry_msgs::msg::Polygon>(
@@ -149,7 +149,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr current_subgoal_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr
       subgoal_marker_pub_;
-  rclcpp::Publisher<safe_bayesian_optimization::msg::PolygonArray>::SharedPtr
+  rclcpp::Publisher<safe_legged_scouting::msg::PolygonArray>::SharedPtr
       polygons_pub_;
   rclcpp::Publisher<geometry_msgs::msg::Polygon>::SharedPtr envelope_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
@@ -1169,7 +1169,7 @@ private:
     RCLCPP_INFO(this->get_logger(),
                 "[MAIN] Publishing %zu obstacle polygons...",
                 obstacle_polygons.size());
-    safe_bayesian_optimization::msg::PolygonArray polygon_array_msg;
+    safe_legged_scouting::msg::PolygonArray polygon_array_msg;
     for (size_t i = 0; i < obstacle_polygons.size(); ++i) {
       const auto &polygon = obstacle_polygons[i];
       geometry_msgs::msg::Polygon msg_polygon;

@@ -49,7 +49,7 @@ class TurtlesimSpatialPublisher(Node):
         try:
             # Use ament_index to find package share directory
             from ament_index_python.packages import get_package_share_directory
-            package_share_dir = get_package_share_directory('safe_bayesian_optimization')
+            package_share_dir = get_package_share_directory('safe_legged_scouting')
             terrain_file = os.path.join(package_share_dir, 'data', 'terrain.csv')
             
             # Load terrain data using numpy

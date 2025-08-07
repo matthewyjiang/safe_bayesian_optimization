@@ -1,4 +1,4 @@
-# Safe Bayesian Optimization
+# Safe Legged Scouting
 
 A ROS 2 package for safe path planning using Bayesian optimization with uncertainty estimation.
 
@@ -27,7 +27,7 @@ colcon build --cmake-args -DBUILD_EXAMPLES=OFF
 
 ## Nodes
 
-- `safe_bayesian_optimization_node`: Main optimizer node that computes safe subgoals
+- `safe_legged_scouting_node`: Main optimizer node that computes safe subgoals
 - `goal_point_publisher`: Publishes test goal points for navigation
 - `reactive_navigation_node`: Reactive navigation node for obstacle avoidance using diffeomorphism-based path planning
 
@@ -62,14 +62,14 @@ colcon build --cmake-args -DBUILD_EXAMPLES=OFF
 ## Usage
 
 ```bash
-ros2 launch safe_bayesian_optimization safe_bayesian_optimization.launch.py
+ros2 launch safe_legged_scouting safe_legged_scouting.launch.py
 ```
 
 ## Configuration
 
 Parameters can be configured in:
 
-### `config/safe_bayesian_optimization.yaml`:
+### `config/safe_legged_scouting.yaml`:
 - `opt.beta`: Exploration parameter for acquisition function
 - `opt.f_min`: Minimum function value threshold
 - `terrain_map.*`: Terrain map dimensions and resolution
@@ -90,10 +90,10 @@ Parameters can be configured in:
 
 ### Published Topics
 
-#### safe_bayesian_optimization_node
+#### safe_legged_scouting_node
 - `/current_subgoal` (`geometry_msgs/Point`) - Computed safe subgoals for reactive navigation
 - `/subgoal_marker` (`visualization_msgs/Marker`) - Visualization marker for current subgoal
-- `/polygon_array` (`safe_bayesian_optimization/PolygonArray`) - Obstacle polygons from unsafe terrain
+- `/polygon_array` (`safe_legged_scouting/PolygonArray`) - Obstacle polygons from unsafe terrain
 - `/envelope_polygon` (`geometry_msgs/Polygon`) - Workspace envelope boundary
 - `/concave_markers` (`visualization_msgs/MarkerArray`) - Safe region boundary visualization
 - `/debug_polygons_image` (`sensor_msgs/Image`) - Debug visualization image (optional)
@@ -117,23 +117,23 @@ Parameters can be configured in:
 
 ### Subscribed Topics
 
-#### safe_bayesian_optimization_node
+#### safe_legged_scouting_node
 - `/goal_point` (`geometry_msgs/Point`) - Target goal points for navigation planning
 
 #### reactive_navigation_node
-- `/polygon_array` (`safe_bayesian_optimization/PolygonArray`) - Obstacle polygons from optimizer
+- `/polygon_array` (`safe_legged_scouting/PolygonArray`) - Obstacle polygons from optimizer
 - `/envelope_polygon` (`geometry_msgs/Polygon`) - Workspace envelope boundary
 - `/turtle1/pose` (`turtlesim/Pose`) - Current robot pose from turtlesim
 - `/current_subgoal` (`geometry_msgs/Point`) - Navigation subgoals from optimizer
 
 ### Service Interfaces
 
-#### safe_bayesian_optimization_node (Client)
+#### safe_legged_scouting_node (Client)
 - `get_spatial_data` (`trusses_custom_interfaces/SpatialData`) - Requests spatial data for terrain analysis
 - `get_terrain_map_with_uncertainty` (`trusses_custom_interfaces/GetTerrainMapWithUncertainty`) - Requests terrain map with uncertainty
 
 ### Custom Messages
-- `safe_bayesian_optimization/PolygonArray` - Array of geometry_msgs/Polygon for obstacle representation
+- `safe_legged_scouting/PolygonArray` - Array of geometry_msgs/Polygon for obstacle representation
 
 ## License
 

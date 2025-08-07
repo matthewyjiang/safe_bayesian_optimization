@@ -1,4 +1,4 @@
-safe_bayesian_optimization_node:
+safe_legged_scouting_node:
   ros__parameters:
     opt: 
       beta: 2.0
