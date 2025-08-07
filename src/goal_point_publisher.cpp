@@ -1,6 +1,10 @@
 #include <geometry_msgs/msg/point_stamped.hpp>
+#include <geometry_msgs/msg/pose.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <visualization_msgs/msg/marker.hpp>
+#include <yaml-cpp/yaml.h>
+#include <vector>
+#include <cmath>
 
 class GoalPointPublisher : public rclcpp::Node {
 public:
@@ -11,29 +15,96 @@ public:
     marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>(
         "goal_marker", 10);
 
-    timer_ = this->create_wall_timer(
-        std::chrono::seconds(1),
-        std::bind(&GoalPointPublisher::publish_goal_point, this));
+    pose_subscriber_ = this->create_subscription<geometry_msgs::msg::Pose>(
+        "spirit/current_pose", 10,
+        std::bind(&GoalPointPublisher::pose_callback, this, std::placeholders::_1));
 
-    RCLCPP_INFO(this->get_logger(), "Goal Point Publisher initialized");
+    timer_ = this->create_wall_timer(
+        std::chrono::seconds(2),
+        std::bind(&GoalPointPublisher::check_waypoint_progress, this));
+
+    load_waypoints_from_config();
+    current_waypoint_index_ = 0;
+
+    RCLCPP_INFO(this->get_logger(), "Goal Point Publisher initialized with %zu waypoints", waypoints_.size());
   }
 
 private:
-  void publish_goal_point() {
+  void load_waypoints_from_config() {
+    this->declare_parameter("waypoints", std::vector<double>{});
+    auto waypoint_params = this->get_parameter("waypoints").as_double_array();
+    
+    if (waypoint_params.size() % 3 != 0) {
+      RCLCPP_ERROR(this->get_logger(), "Waypoints parameter must contain triplets of x,y,z coordinates");
+      return;
+    }
+    
+    for (size_t i = 0; i < waypoint_params.size(); i += 3) {
+      geometry_msgs::msg::Point point;
+      point.x = waypoint_params[i];
+      point.y = waypoint_params[i + 1];
+      point.z = waypoint_params[i + 2];
+      waypoints_.push_back(point);
+    }
+    
+    RCLCPP_INFO(this->get_logger(), "Loaded %zu waypoints from config", waypoints_.size());
+  }
+
+  void pose_callback(const geometry_msgs::msg::Pose::SharedPtr msg) {
+    current_pose_ = *msg;
+    pose_received_ = true;
+  }
+
+  void check_waypoint_progress() {
+    if (waypoints_.empty() || current_waypoint_index_ >= waypoints_.size()) {
+      return;
+    }
+
+    // Always publish current goal
+    publish_current_goal();
+
+    // Check if we have pose data to determine progress
+    if (!pose_received_) {
+      return;
+    }
+
+    double distance = calculate_distance(current_pose_.position, waypoints_[current_waypoint_index_]);
+    
+    RCLCPP_INFO(this->get_logger(), "Distance to waypoint %zu: %.3f m (robot: %.2f, %.2f) (goal: %.2f, %.2f)", 
+                current_waypoint_index_, distance,
+                current_pose_.position.x, current_pose_.position.y,
+                waypoints_[current_waypoint_index_].x, waypoints_[current_waypoint_index_].y);
+    
+    if (distance <= 0.1) {
+      current_waypoint_index_++;
+      
+      if (current_waypoint_index_ < waypoints_.size()) {
+        RCLCPP_INFO(this->get_logger(), "Reached waypoint, moving to next waypoint %zu", current_waypoint_index_);
+      } else {
+        RCLCPP_INFO(this->get_logger(), "All waypoints reached!");
+      }
+    }
+  }
+
+  void publish_current_goal() {
+    if (current_waypoint_index_ >= waypoints_.size()) {
+      return;
+    }
+
     geometry_msgs::msg::PointStamped msg;
     msg.header.frame_id = "map";
     msg.header.stamp = this->get_clock()->now();
-    msg.point.x = 12.0;
-    msg.point.y = 4.0;
-    msg.point.z = 0.0;
+    msg.point = waypoints_[current_waypoint_index_];
 
     publisher_->publish(msg);
-
-    // Publish goal marker for visualization
     publish_goal_marker(msg.point);
 
-    RCLCPP_INFO(this->get_logger(), "Published goal point: (%.2f, %.2f)",
-                msg.point.x, msg.point.y);
+    RCLCPP_INFO(this->get_logger(), "Published goal point %zu: (%.2f, %.2f, %.2f)",
+                current_waypoint_index_, msg.point.x, msg.point.y, msg.point.z);
+  }
+
+  double calculate_distance(const geometry_msgs::msg::Point& p1, const geometry_msgs::msg::Point& p2) {
+    return std::sqrt(std::pow(p1.x - p2.x, 2) + std::pow(p1.y - p2.y, 2) + std::pow(p1.z - p2.z, 2));
   }
 
   void publish_goal_marker(const geometry_msgs::msg::Point &goal) {
@@ -64,7 +135,13 @@ private:
 
   rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr publisher_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
+  rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr pose_subscriber_;
   rclcpp::TimerBase::SharedPtr timer_;
+  
+  std::vector<geometry_msgs::msg::Point> waypoints_;
+  size_t current_waypoint_index_;
+  geometry_msgs::msg::Pose current_pose_;
+  bool pose_received_ = false;
 };
 
 int main(int argc, char *argv[]) {

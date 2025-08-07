@@ -114,7 +114,7 @@ class TurtlesimSpatialPublisher(Node):
             return
         
         num_points = 30  # Number of random points to publish
-        max_distance = 2  # Maximum distance from robot
+        max_distance = 1  # Maximum distance from robot
         
         for i in range(num_points):
             # Generate random point in vicinity of robot

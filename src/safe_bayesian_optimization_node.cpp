@@ -516,10 +516,29 @@ private:
     const Eigen::VectorXd distances =
         (frontier_points.rowwise() - goal_eigen.transpose()).rowwise().norm();
 
-    const Eigen::VectorXd scores =
-        distances.array() / (frontier_confidence_width.array() + 1e-6);
-    int best_index;
-    scores.minCoeff(&best_index);
+    // Sort points by distance to goal
+    std::vector<std::pair<double, size_t>> distance_pairs;
+    for (size_t i = 0; i < num_frontiers; ++i) {
+      distance_pairs.emplace_back(distances(i), i);
+    }
+    std::sort(distance_pairs.begin(), distance_pairs.end());
+
+    // Take top 25% of closest points
+    size_t top_quarter_size = std::max(size_t(1), distance_pairs.size() / 4);
+    
+    // Find the point with best confidence width among the closest points
+    double best_confidence_width = -1.0;
+    int best_index = -1;
+    
+    for (size_t i = 0; i < top_quarter_size; ++i) {
+      size_t frontier_idx = distance_pairs[i].second;
+      double conf_width = frontier_confidence_width(frontier_idx);
+      
+      if (conf_width > best_confidence_width) {
+        best_confidence_width = conf_width;
+        best_index = frontier_idx;
+      }
+    }
 
     return frontier_indices[best_index];
   }
