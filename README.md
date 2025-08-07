@@ -21,6 +21,9 @@ colcon build --cmake-args -DBUILD_EXAMPLES=OFF
 - **Terrain Mapping Integration**: Connects with terrain mapping services for real-time updates
 - **Debug Visualization**: Integrated debug image publishing for development and testing
 - **ROS 2 Native**: Built for ROS 2 with standard message interfaces
+- **Alpha Shape Processing**: CGAL alpha shapes for concave hull generation
+- **Voronoi-Based Navigation**: MyGAL library for free space computation
+- **Foxglove Integration**: Real-time visualization support
 
 ## Nodes
 
@@ -39,7 +42,7 @@ colcon build --cmake-args -DBUILD_EXAMPLES=OFF
 - **Eigen3**: Linear algebra operations for bayesian optimization
 - **OpenCV**: For finding contours on safe set 
 - **Boost**: Geometry operations
-- **CGAL**: Computational geometry algorithms - alphashape
+- **CGAL**: Computational geometry algorithms - alpha shapes
 
 ### ROS 2 Packages
 - **Standard ROS 2 Packages**:
@@ -55,9 +58,6 @@ colcon build --cmake-args -DBUILD_EXAMPLES=OFF
 
 ### Custom Interfaces
 - **`trusses_custom_interfaces`**: Custom service definitions for spatial data and terrain mapping
-
-### External Dependencies (Fetched)
-- **MyGAL**: Voronoi diagram generation library (fetched from GitHub)
 
 ## Usage
 
@@ -75,16 +75,16 @@ Parameters can be configured in:
 - `terrain_map.*`: Terrain map dimensions and resolution
 
 ### `config/reactive_planner.yaml`:
-- `reactive_planner.p`: Diffeomorphism parameter
-- `reactive_planner.epsilon`: Smoothness parameter
-- `reactive_planner.varepsilon`: Small perturbation parameter
-- `reactive_planner.mu_1`, `reactive_planner.mu_2`: Scaling parameters
-- `reactive_planner.robot_radius`: Robot collision radius
-- `reactive_planner.linear_gain`: Linear velocity gain
-- `reactive_planner.angular_gain`: Angular velocity gain
-- `reactive_planner.linear_cmd_limit`: Maximum linear velocity command
-- `reactive_planner.angular_cmd_limit`: Maximum angular velocity command
-- `reactive_planner.goal_tolerance`: Distance tolerance to stop near subgoal
+- `p`: Diffeomorphism parameter
+- `epsilon`: Smoothness parameter
+- `varepsilon`: Small perturbation parameter
+- `mu_1`, `mu_2`: Scaling parameters
+- `robot_radius`: Robot collision radius
+- `linear_gain`: Linear velocity gain
+- `angular_gain`: Angular velocity gain
+- `linear_cmd_limit`: Maximum linear velocity command
+- `angular_cmd_limit`: Maximum angular velocity command
+- `goal_tolerance`: Distance tolerance to stop near subgoal
 
 ## Topic Interfaces
 
@@ -106,6 +106,14 @@ Parameters can be configured in:
 #### goal_point_publisher
 - `/goal_point` (`geometry_msgs/Point`) - Test goal points for navigation
 - `/goal_marker` (`visualization_msgs/Marker`) - Goal point visualization marker
+
+#### Additional System Nodes
+- **visualizer** (`foxglove_visualization`) - Real-time visualization interface
+- **leg_measurements_publisher** (`foxglove_visualization`) - Leg sensor data publishing
+- **fake_data_publisher** (`foxglove_visualization`) - Test data generation
+- **data_collector** (`mapping_collector`) - Sensor data collection
+- **terrain_mapping_node** (`mapping_package`) - Terrain map generation
+- **turtlesim_node** (`turtlesim`) - Robot simulation environment
 
 ### Subscribed Topics
 
