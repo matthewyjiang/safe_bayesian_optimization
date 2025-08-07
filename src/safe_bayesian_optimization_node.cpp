@@ -1,7 +1,7 @@
 #include "polygeom_lib.h"
 #include "safe_bayesian_optimization/msg/polygon_array.hpp"
 #include "trusses_custom_interfaces/srv/get_terrain_map_with_uncertainty.hpp"
-#include "trusses_custom_interfaces/srv/spatial_data.hpp"
+#include "std_msgs/msg/int32.hpp"
 #include <CGAL/Alpha_shape_2.h>
 #include <CGAL/Alpha_shape_face_base_2.h>
 #include <CGAL/Alpha_shape_vertex_base_2.h>
@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <boost/geometry.hpp>
+#include <chrono>
 #include <boost/geometry/algorithms/buffer.hpp>
 #include <boost/geometry/algorithms/detail/envelope/interface.hpp>
 #include <boost/geometry/algorithms/difference.hpp>
@@ -71,18 +72,21 @@ public:
     robot_radius_ = this->get_parameter("robot.radius").as_double();
 
     // Create service clients
-    spatial_data_client_ =
-        this->create_client<trusses_custom_interfaces::srv::SpatialData>(
-            "get_spatial_data");
     terrain_map_client_ = this->create_client<
         trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>(
         "get_terrain_map_with_uncertainty");
 
-    // Create subscriber
+    // Create subscribers
     goal_point_sub_ =
         this->create_subscription<geometry_msgs::msg::PointStamped>(
             "goal_point", 10,
             std::bind(&OptimizerNode::goal_point_callback, this,
+                      std::placeholders::_1));
+    
+    spatial_data_size_sub_ =
+        this->create_subscription<std_msgs::msg::Int32>(
+            "spatial_data_size", 10,
+            std::bind(&OptimizerNode::spatial_data_size_callback, this,
                       std::placeholders::_1));
 
     // Create publishers
@@ -115,10 +119,8 @@ public:
           "debug_polygons_image", 10);
     }
 
-    // Create timer to check spatial data periodically
-    spatial_data_timer_ = this->create_wall_timer(
-        std::chrono::seconds(5),
-        std::bind(&OptimizerNode::check_spatial_data, this));
+    // Initialize last spatial data size
+    last_spatial_data_size_ = 0;
 
     RCLCPP_INFO(this->get_logger(), "Optimizer Node Initialized");
   }
@@ -137,13 +139,13 @@ private:
   double robot_radius_;
 
   // Spatial data monitoring
-  rclcpp::Client<trusses_custom_interfaces::srv::SpatialData>::SharedPtr
-      spatial_data_client_;
   rclcpp::Client<trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>::
       SharedPtr terrain_map_client_;
-  rclcpp::TimerBase::SharedPtr spatial_data_timer_;
   rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr
       goal_point_sub_;
+  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr
+      spatial_data_size_sub_;
+  int last_spatial_data_size_;
   rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr current_subgoal_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr
       subgoal_marker_pub_;
@@ -170,6 +172,9 @@ private:
 
   // Store eroded concave polygon for subgoal projection
   bg::model::polygon<bg::model::d2::point_xy<double>> eroded_concave_polygon_;
+
+  // Timing variables for terrain map request
+  std::chrono::steady_clock::time_point terrain_request_start_time_;
 
   // Disjoint set data structure using map
   class DisjointSet {
@@ -358,6 +363,7 @@ private:
     return components;
   }
 
+
   std::vector<std::vector<int>> compute_disjoint_safe_sets() {
     RCLCPP_INFO(this->get_logger(),
                 "[DISJOINT] Starting compute_disjoint_safe_sets()");
@@ -543,41 +549,20 @@ private:
     return frontier_indices[best_index];
   }
 
-  void check_spatial_data() {
-    using namespace std::chrono_literals;
-
-    if (!spatial_data_client_->wait_for_service(0s)) {
-      RCLCPP_WARN(this->get_logger(),
-                  "Spatial data service 'get_spatial_data' not available");
-      return;
+  void spatial_data_size_callback(const std_msgs::msg::Int32::SharedPtr msg) {
+    int current_size = msg->data;
+    
+    // Only process if the size has changed
+    if (current_size != last_spatial_data_size_) {
+      RCLCPP_INFO(this->get_logger(),
+                  "Spatial data size changed: %d -> %d",
+                  last_spatial_data_size_, current_size);
+      
+      last_spatial_data_size_ = current_size;
+      
+      // Request terrain map when size changes
+      request_terrain_map();
     }
-
-    auto request = std::make_shared<
-        trusses_custom_interfaces::srv::SpatialData::Request>();
-
-    // Use callback-based async call
-    spatial_data_client_->async_send_request(
-        request,
-        [this](rclcpp::Client<trusses_custom_interfaces::srv::SpatialData>::
-                   SharedFuture future) {
-          auto response = future.get();
-          if (response->success) {
-            RCLCPP_INFO(this->get_logger(),
-                        "Received spatial data with %zu points",
-                        response->values.size());
-
-            // Process the spatial data here
-            // response->x_coords, response->y_coords, response->values
-
-            // Request terrain map with resolution (service will calculate
-            // dimensions from data bounds)
-            request_terrain_map();
-
-          } else {
-            RCLCPP_WARN(this->get_logger(), "Spatial data request failed: %s",
-                        response->message.c_str());
-          }
-        });
   }
 
   void request_terrain_map() {
@@ -600,12 +585,24 @@ private:
                 "(service will calculate dimensions from data bounds)",
                 terrain_x_resolution_, terrain_y_resolution_);
 
+    // Start timing the terrain map request
+    terrain_request_start_time_ = std::chrono::steady_clock::now();
+    RCLCPP_INFO(this->get_logger(), "Starting terrain map request timing...");
+
     // Use callback-based async call
     terrain_map_client_->async_send_request(
         request,
         [this](rclcpp::Client<
                trusses_custom_interfaces::srv::GetTerrainMapWithUncertainty>::
                    SharedFuture future) {
+          // Calculate terrain map request duration
+          auto end_time = std::chrono::steady_clock::now();
+          auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+              end_time - terrain_request_start_time_);
+          
+          RCLCPP_INFO(this->get_logger(), 
+                      "Terrain map request completed in %ld ms", duration.count());
+          
           auto response = future.get();
           if (response->success) {
             RCLCPP_INFO(this->get_logger(), "Received terrain map: %s",

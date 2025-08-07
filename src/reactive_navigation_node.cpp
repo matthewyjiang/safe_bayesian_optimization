@@ -235,9 +235,6 @@ private:
       }
     }
 
-    RCLCPP_INFO(this->get_logger(), "Dilated %zu polygons",
-                polygon_list.size());
-
     if (polygon_list.empty()) {
       return {};
     }
@@ -265,17 +262,11 @@ private:
       polygon_list_merged.push_back(simplified_component);
     }
 
-    RCLCPP_INFO(this->get_logger(),
-                "Merged %zu dilated polygons into %zu merged polygons",
-                obstacle_polygons_.size(), polygon_list_merged.size());
-
     return polygon_list_merged;
   }
 
   void obstacles_callback(
       const safe_bayesian_optimization::msg::PolygonArray::SharedPtr msg) {
-    RCLCPP_INFO(this->get_logger(), "Received %zu obstacle polygons",
-                msg->polygons.size());
 
     // Clear previous obstacles
     obstacle_polygons_.clear();
@@ -310,27 +301,11 @@ private:
 
       obstacle_polygons_.push_back(boost_poly);
     }
-    RCLCPP_INFO(this->get_logger(),
-                "Converted %zu obstacle polygons to boost geometry format",
-                obstacle_polygons_.size());
 
     auto merged_polygons = get_merged_dilated_polygons();
 
     // Publish merged polygon markers for visualization
     publish_merged_polygon_markers(merged_polygons);
-
-    // Print merged polygons for gnuplot visualization
-    RCLCPP_INFO(this->get_logger(),
-                "Printing %zu merged polygons before diffeo tree conversion:",
-                merged_polygons.size());
-    for (size_t i = 0; i < merged_polygons.size(); ++i) {
-      const auto &poly = merged_polygons[i];
-      RCLCPP_INFO(this->get_logger(),
-                  "Merged polygon %zu: %zu vertices, area=%.6f", i,
-                  poly.outer().size(), bg::area(poly));
-    }
-
-    // Visualize merged polygons in gnuplot format
 
     // Get envelope polygon for intersection
     std::vector<std::vector<double>> workspace = diffeo_params_.get_workspace();
@@ -378,10 +353,6 @@ private:
             clipped_poly = poly;
           }
         }
-
-        RCLCPP_INFO(this->get_logger(),
-                    "Clipped polygon: original area=%.6f, clipped area=%.6f",
-                    bg::area(merged_poly), bg::area(clipped_poly));
       }
 
       // Skip if clipped polygon is too small
@@ -394,8 +365,6 @@ private:
       clipped_polygons.push_back(clipped_poly);
 
       std::vector<PolygonClass> tree;
-      RCLCPP_INFO(this->get_logger(),
-                  "Converting clipped polygon to diffeomorphism tree");
       diffeoTreeConvex(BoostPointToStd(BoostPolyToBoostPoint(clipped_poly)),
                        diffeo_params_, &tree);
       diffeo_tree_array_.push_back(tree);
@@ -403,12 +372,6 @@ private:
 
     // Publish clipped polygon markers for visualization
     publish_clipped_polygon_markers(clipped_polygons);
-    RCLCPP_INFO(this->get_logger(),
-                "Done converting merged polygon to diffeomorphism tree");
-
-    RCLCPP_INFO(this->get_logger(),
-                "Converted %zu merged polygons to diffeomorphism trees",
-                diffeo_tree_array_.size());
   }
 
   void envelope_callback(const geometry_msgs::msg::Polygon::SharedPtr msg) {
@@ -502,23 +465,11 @@ private:
       model_obstacle_radii.push_back(root_radius);
     }
 
-    // log the centers and radii of model obstacles
-    RCLCPP_INFO(this->get_logger(), "Model obstacle centers and radii:");
-    for (size_t i = 0; i < model_obstacle_centers.size(); ++i) {
-      RCLCPP_INFO(this->get_logger(),
-                  "Obstacle %zu: center=(%.2f, %.2f), radius=%.2f", i,
-                  model_obstacle_centers[i].get<0>(),
-                  model_obstacle_centers[i].get<1>(), model_obstacle_radii[i]);
-    }
-
     RCLCPP_INFO(this->get_logger(), "computing local workspace polygon");
 
     polygon local_workspace_polygon = compute_local_workspace_polygon(
         transform_result.transformed_position, model_obstacle_centers,
         model_obstacle_radii);
-    RCLCPP_INFO(this->get_logger(), "transformed_position=(%.3f, %.3f)",
-                transform_result.transformed_position[0],
-                transform_result.transformed_position[1]);
 
     polygon local_free_space_polygon;
     if (local_workspace_polygon.outer().size() < 3) {
@@ -649,18 +600,9 @@ private:
           std::max(-linear_cmd_limit_, std::min(linear_cmd, linear_cmd_limit_));
       cmd_vel.angular.z = std::max(-angular_cmd_limit_,
                                    std::min(angular_cmd, angular_cmd_limit_));
-      RCLCPP_INFO(this->get_logger(),
-                  "Velocity vector: x=%.3f, y=%.3f, magnitude=%.3f",
-                  cmd_vel.linear.x, cmd_vel.linear.y,
-                  std::sqrt(cmd_vel.linear.x * cmd_vel.linear.x +
-                            cmd_vel.linear.y * cmd_vel.linear.y));
     }
 
     cmd_vel_pub_->publish(cmd_vel);
-
-    RCLCPP_INFO(this->get_logger(),
-                "Published cmd_vel: linear.x=%.3f, angular.z=%.3f",
-                cmd_vel.linear.x, cmd_vel.angular.z);
   }
 
   polygon
@@ -1088,9 +1030,6 @@ private:
 
   void publish_freespace_markers(const polygon &local_free_space_polygon) {
     auto marker_array = visualization_msgs::msg::MarkerArray();
-    RCLCPP_INFO(this->get_logger(),
-                "Publishing freespace markers for polygon with %zu points",
-                local_free_space_polygon.outer().size());
 
     // Create a marker for the freespace polygon
     auto marker = visualization_msgs::msg::Marker();
