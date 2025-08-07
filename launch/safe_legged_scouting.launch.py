@@ -19,9 +19,9 @@ def generate_launch_description():
     config_file_arg = DeclareLaunchArgument(
             'config_file',
             default_value=PathJoinSubstitution([
-                FindPackageShare('safe_bayesian_optimization'),
+                FindPackageShare('safe_legged_scouting'),
                 'config',
-                'safe_bayesian_optimization.yaml'
+                'safe_legged_scouting.yaml'
                 ]),
             description='Path to the configuration file'
             )
@@ -29,14 +29,14 @@ def generate_launch_description():
     reactive_planner_config_arg = DeclareLaunchArgument(
             'reactive_planner_config',
             default_value=PathJoinSubstitution([
-                FindPackageShare('safe_bayesian_optimization'),
+                FindPackageShare('safe_legged_scouting'),
                 'config',
                 'reactive_planner.yaml'
                 ]),
             description='Path to the reactive planner configuration file'
             )
 
-    yaml_dir = get_package_share_directory("safe_bayesian_optimization")
+    yaml_dir = get_package_share_directory("safe_legged_scouting")
     config_file = os.path.join(yaml_dir, 'config/lpsc.yaml')
     print(config_file)
     # LaunchConfiguration('ros_control_config').perform(context)
@@ -62,20 +62,20 @@ def generate_launch_description():
         config_file_arg,
         reactive_planner_config_arg, 
          Node(
-            package='safe_bayesian_optimization',
-             executable='safe_bayesian_optimization_node',
-             name='safe_bayesian_optimization_node',
+            package='safe_legged_scouting',
+             executable='safe_legged_scouting_node',
+             name='safe_legged_scouting_node',
              parameters=[LaunchConfiguration('config_file'), LaunchConfiguration('reactive_planner_config')],
              output='screen'
              ),
          Node(
-             package='safe_bayesian_optimization',
+             package='safe_legged_scouting',
              executable='goal_point_publisher',
              name='goal_point_publisher',
              output='screen'
              ),
          Node(
-            package='safe_bayesian_optimization',
+            package='safe_legged_scouting',
             executable='reactive_navigation_node',
             name='reactive_navigation_node',
             parameters=[LaunchConfiguration('reactive_planner_config')],

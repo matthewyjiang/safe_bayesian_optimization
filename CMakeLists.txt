@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(safe_bayesian_optimization)
+project(safe_legged_scouting)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -69,13 +69,13 @@ add_library(reactive_planner
 )
 
 # Add executables
-add_executable(safe_bayesian_optimization_node src/safe_bayesian_optimization_node.cpp)
+add_executable(safe_legged_scouting_node src/safe_legged_scouting_node.cpp)
 add_executable(goal_point_publisher src/goal_point_publisher.cpp)
 add_executable(reactive_navigation_node src/reactive_navigation_node.cpp)
 
 # Add dependencies
 ament_target_dependencies(
-    safe_bayesian_optimization_node rclcpp trusses_custom_interfaces Eigen3 geometry_msgs sensor_msgs cv_bridge Boost OpenCV CGAL visualization_msgs
+    safe_legged_scouting_node rclcpp trusses_custom_interfaces Eigen3 geometry_msgs sensor_msgs cv_bridge Boost OpenCV CGAL visualization_msgs
 )
 
 target_link_libraries(reactive_planner
@@ -85,7 +85,7 @@ target_link_libraries(reactive_planner
 )
 
 target_link_libraries(
-    safe_bayesian_optimization_node
+    safe_legged_scouting_node
     ${Boost_LIBRARIES}
     ${OpenCV_LIBS}
     Qhull::qhullcpp
@@ -107,7 +107,7 @@ target_link_libraries(
 )
 
 
-rosidl_target_interfaces(safe_bayesian_optimization_node
+rosidl_target_interfaces(safe_legged_scouting_node
   ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
 rosidl_target_interfaces(reactive_navigation_node
@@ -133,7 +133,7 @@ install(PROGRAMS
 
 # Install executables
 install(TARGETS
-  safe_bayesian_optimization_node
+  safe_legged_scouting_node
   goal_point_publisher
   reactive_navigation_node
   DESTINATION lib/${PROJECT_NAME}

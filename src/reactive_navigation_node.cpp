@@ -1,6 +1,6 @@
 #include "polygeom_lib.h"
 #include "reactive_planner_lib.h"
-#include "safe_bayesian_optimization/msg/polygon_array.hpp"
+#include "safe_legged_scouting/msg/polygon_array.hpp"
 
 #include <Eigen/Dense>
 #include <boost/geometry.hpp>
@@ -75,7 +75,7 @@ public:
 
     // Subscribe to obstacle polygons
     obstacles_sub_ = this->create_subscription<
-        safe_bayesian_optimization::msg::PolygonArray>(
+        safe_legged_scouting::msg::PolygonArray>(
         "polygon_array", 10,
         std::bind(&ReactiveNavigationNode::obstacles_callback, this,
                   std::placeholders::_1));
@@ -156,7 +156,7 @@ public:
   }
 
 private:
-  rclcpp::Subscription<safe_bayesian_optimization::msg::PolygonArray>::SharedPtr
+  rclcpp::Subscription<safe_legged_scouting::msg::PolygonArray>::SharedPtr
       obstacles_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr envelope_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr pose_sub_;
@@ -266,7 +266,7 @@ private:
   }
 
   void obstacles_callback(
-      const safe_bayesian_optimization::msg::PolygonArray::SharedPtr msg) {
+      const safe_legged_scouting::msg::PolygonArray::SharedPtr msg) {
 
     // Clear previous obstacles
     obstacle_polygons_.clear();
