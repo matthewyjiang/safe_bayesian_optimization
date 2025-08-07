@@ -755,12 +755,45 @@ private:
     Alpha_shape_2 alpha_shape(cgal_points.begin(), cgal_points.end());
     alpha_shape.set_mode(Alpha_shape_2::REGULARIZED);
 
-    // Find optimal alpha value
-    auto alpha_iterator = alpha_shape.find_optimal_alpha(1);
-    if (alpha_iterator != alpha_shape.alpha_end()) {
-      alpha_shape.set_alpha(*alpha_iterator);
-    } else {
-      alpha_shape.set_alpha(0.1);
+    // Find optimal alpha value - start with infinity (convex hull) and work down
+    alpha_shape.set_alpha(std::numeric_limits<double>::infinity());
+    
+    // Get all possible alpha values in descending order
+    std::vector<double> alpha_values;
+    for (auto alpha_it = alpha_shape.alpha_begin(); alpha_it != alpha_shape.alpha_end(); ++alpha_it) {
+      if (*alpha_it > 0) {
+        alpha_values.push_back(*alpha_it);
+      }
+    }
+    std::sort(alpha_values.rbegin(), alpha_values.rend()); // Sort in descending order
+    
+    // Find the largest alpha that includes all points
+    bool found_valid_alpha = false;
+    for (double alpha_val : alpha_values) {
+      alpha_shape.set_alpha(alpha_val);
+      
+      // Count vertices in the alpha shape
+      int vertex_count = 0;
+      for (auto vertex_it = alpha_shape.alpha_shape_vertices_begin();
+           vertex_it != alpha_shape.alpha_shape_vertices_end(); ++vertex_it) {
+        vertex_count++;
+      }
+      
+      // If this alpha includes all or most points (at least 90%), use it
+      if (vertex_count >= static_cast<int>(cgal_points.size() * 0.9)) {
+        found_valid_alpha = true;
+        RCLCPP_INFO(this->get_logger(), 
+                    "[POLYGON] Using alpha=%f, includes %d/%zu vertices", 
+                    alpha_val, vertex_count, cgal_points.size());
+        break;
+      }
+    }
+    
+    if (!found_valid_alpha) {
+      // Fallback to a very large alpha to ensure we get most points
+      alpha_shape.set_alpha(std::numeric_limits<double>::infinity());
+      RCLCPP_WARN(this->get_logger(), 
+                  "[POLYGON] Using convex hull (alpha=infinity) as fallback");
     }
 
     // Collect boundary edges
